@@ -6,21 +6,20 @@ from suite2p.extraction.masks import create_cell_pix, create_neuropil_masks, cre
 from suite2p.extraction.extract import extract_traces_from_masks
 from suite2p.detection import roi_stats
 
-# Read in mask data from cellpose
-# cellpose_fpath = "/Users/sandrareinert/Library/Mobile Documents/com~apple~CloudDocs/Documents/Postdoc_SWC/Local/Stack 1/mean_img_seg.npy"
-# cellpose_fpath = "/media/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2/TAA0000066/ses-008_date-20250306_protocol-t3/funcimg/Session/suite2p/plane0/meanImg_seg.npy"
-sessions = ['TAA0000066/ses-020_date-20250412_protocol-t14'] 
-
+sessions = ['TAA0000062/ses-015_date-20250413_protocol-t8', 'TAA0000065/ses-014_date-20250411_protocol-t8'] 
 
 for session in sessions: 
     print(f"Processing session: {session}")
-    cellpose_fpath = "/Volumes/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2/" + session + "/funcimg/Session/suite2p/plane0/meanImg_seg.npy"
+
+    # Read in mask data from cellpose
+    # cellpose_fpath = "/Users/sandrareinert/Library/Mobile Documents/com~apple~CloudDocs/Documents/Postdoc_SWC/Local/Stack 1/mean_img_seg.npy"
+    cellpose_fpath = "/media/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2/" + session + "/funcimg/Session/suite2p/plane0/meanImg_seg.npy"
     cellpose_masks = np.load(cellpose_fpath, allow_pickle=True).item()
 
     # Read in existing data from a suite2p run. We will use the "ops" and registered binary.
-    # wd_path = '/Users/sandrareinert/Library/Mobile Documents/com~apple~CloudDocs/Documents/Postdoc_SWC/Local/Stack 1/suite2p/plane0'  # This should be the folder where processed suite2p files are saved. Consider making a backup copy of this folder before starting
-    # wd_path = '/media/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2/TAA0000066/ses-008_date-20250306_protocol-t3/funcimg/Session/suite2p/plane0/'
-    wd_path = '/Volumes/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2/' + session + '/funcimg/Session/suite2p/plane0/'
+    # This should be the folder where processed suite2p files are saved. Consider making a backup copy of this folder before starting
+    # wd_path = '/Users/sandrareinert/Library/Mobile Documents/com~apple~CloudDocs/Documents/Postdoc_SWC/Local/Stack 1/suite2p/plane0'  
+    wd_path = '/media/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2/' + session + '/funcimg/Session/suite2p/plane0/'
     wd = Path(wd_path)
     ops = np.load(wd/'ops.npy', allow_pickle=True).item()
     Lx = ops['Lx']

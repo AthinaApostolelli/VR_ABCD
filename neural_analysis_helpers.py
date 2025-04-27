@@ -367,7 +367,7 @@ def plot_avg_landmark_psth(neurons, psth, average_psth, num_landmarks=10, time_a
 
 
 def plot_landmark_psth_map(average_psth, zscoring=True, sorting_lm=0, num_landmarks=10, time_around=1, funcimg_frame_rate=45, save_plot=False, savepath='', savedir='', filename=''):
-    '''Plot firing maps of all reward-tuned neurons, sorted by specific landmark.'''
+    '''Plot firing maps of all selected neurons for all landmarks, sorted by specific landmark.'''
 
     if sorting_lm >= num_landmarks:
         raise ValueError(f'The sorting landmark should be one of the {num_landmarks} landmarks.')
@@ -406,11 +406,126 @@ def plot_landmark_psth_map(average_psth, zscoring=True, sorting_lm=0, num_landma
         plt.show()
 
 
+def plot_goal_psth_map(average_psths, zscoring=True, sorting_goal=1, time_around=1, funcimg_frame_rate=45, save_plot=False, savepath='', savedir='', filename=''):
+    '''Plot firing maps of all selected neurons for each goal, sorted by specific goal.'''
+
+    num_goals = len(average_psths)
+    if num_goals == 4:
+        goals = ['A','B','C','D']
+    else:
+        goals = ['A','B']
+
+    if sorting_goal not in average_psths:
+        raise ValueError(f'The sorting landmark should be one of the {num_goals} landmarks.')
+    
+    time_window = time_around * funcimg_frame_rate # frames
+    num_timebins = 2*time_window
+
+    data = average_psths.copy()
+    if zscoring:
+        for goal in data.keys():
+            data[goal] = stats.zscore(data[goal], axis=1)
+    
+    # Find global vmin and vmax across all goals
+    vmin = min([np.nanmin(arr) for arr in data.values()])
+    vmax = max([np.nanmax(arr) for arr in data.values()])
+
+    im = [[] for _ in range(num_goals)]
+    fig, ax = plt.subplots(1, num_goals, figsize=(3*num_goals, 4), sharey=True, sharex=True)
+    ax = ax.ravel()
+
+    sortidx = np.argsort(np.argmax(data[sorting_goal], axis=1))  # expects a dict with keys = goals
+
+    for i, goal in enumerate(sorted(data.keys())):
+        im[i] = ax[i].imshow(data[goal][sortidx, :], aspect='auto', vmin=vmin, vmax=vmax)
+        ax[i].vlines(time_window-0.5, ymin=-0.5, ymax=data[goal].shape[0]-0.5, color='k', linewidth=0.5)
+        ax[i].set_xlabel('Time')
+        ax[i].set_xticks([-0.5, num_timebins/2-0.5, num_timebins-0.5])
+        ax[i].set_xticklabels([int(-time_around), 0, int(time_around)])
+        ax[i].spines[['right', 'top']].set_visible(False)
+        ax[i].set_title(goals[i])
+
+    ax[0].set_yticks([-0.5, data[goal].shape[0]-0.5])
+    ax[0].set_yticklabels([0, data[goal].shape[0]])
+    ax[0].set_ylabel('Neuron')
+
+    cbar = fig.colorbar(im[-1], ax=fig.axes, shrink=0.6)
+
+    cbar.set_ticks([vmin, vmax])
+    cbar.ax.set_yticklabels([str(int(round(vmin))), str(int(round(vmax)))], fontsize=8)
+    cbar.set_label(r'z-scored $\Delta$F/F0' if zscoring else r'$\Delta$F/F0', rotation=270, labelpad=10, fontsize=8)
+    
+    if save_plot:
+        output_path = os.path.join(savepath, savedir)
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+        plt.savefig(os.path.join(output_path, f'{filename}.png'))
+        plt.show()
+
+
+def plot_all_sessions_goal_psth_map(all_average_psths, zscoring=True, sorting_goal=1, time_around=1, funcimg_frame_rate=45, save_plot=False, savepath='', savedir='', filename=''):
+    '''Plot firing maps for all sessions and each goal, sorted by a specific goal.'''
+
+    num_sessions = len(all_average_psths)
+    num_goals = len(all_average_psths[0])  # assuming each session has same number of goals
+
+    if num_goals == 4:
+        goals = ['A','B','C','D']
+    else:
+        goals = ['A','B']
+
+    time_window = time_around * funcimg_frame_rate # frames
+    num_timebins = 2*time_window
+
+    # Copy and optionally z-score
+    data = []
+    for session in all_average_psths:
+        session_data = {}
+        for goal in session.keys():
+            session_data[goal] = stats.zscore(session[goal], axis=1) if zscoring else session[goal]
+        data.append(session_data)
+
+    # Compute global vmin/vmax
+    vmin = min([np.nanmin(session[goal]) for session in data for goal in session.keys()])
+    vmax = max([np.nanmax(session[goal]) for session in data for goal in session.keys()])
+
+    # Sort neurons consistently across sessions (using sorting_goal)
+    sortidx = np.argsort(np.argmax(data[0][sorting_goal], axis=1))  # reference the first session for sorting
+
+    # Set up figure
+    fig, ax = plt.subplots(num_sessions, num_goals, figsize=(3*num_goals, 3*num_sessions), sharex=True, sharey=True)
+    if num_sessions == 1 or num_goals == 1:
+        ax = np.atleast_2d(ax)
+    ax = np.array(ax)
+
+    for s in range(num_sessions):
+        for g, goal in enumerate(sorted(data[s].keys())):
+            ax[s,g].imshow(data[s][goal][sortidx, :], aspect='auto', vmin=vmin, vmax=vmax)
+            ax[s,g].vlines(time_window-0.5, ymin=-0.5, ymax=data[s][goal].shape[0]-0.5, color='k', linewidth=0.5)
+            ax[s,g].set_xticks([-0.5, num_timebins/2-0.5, num_timebins-0.5])
+            ax[s,g].set_xticklabels([int(-time_around), 0, int(time_around)])
+            ax[s,g].spines[['right', 'top']].set_visible(False)
+            if s == 0:
+                ax[s,g].set_title(goals[g])
+            if g == 0:
+                ax[s,g].set_ylabel(f'Session {s+1}\nNeuron')
+
+    # Add colorbar
+    cbar = fig.colorbar(ax[0,0].images[0], ax=ax.ravel().tolist(), shrink=0.6)
+    cbar.set_ticks([vmin, vmax])
+    cbar.ax.set_yticklabels([str(int(round(vmin))), str(int(round(vmax)))], fontsize=8)
+    cbar.set_label(r'z-scored $\Delta$F/F0' if zscoring else r'$\Delta$F/F0', rotation=270, labelpad=10, fontsize=8)
+
+    if save_plot:
+        output_path = os.path.join(savepath, savedir)
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+        plt.savefig(os.path.join(output_path, f'{filename}.png'))
+    plt.show()
+
+
 def plot_condition_psth_map(average_psths, conditions, zscoring=True, time_around=1, funcimg_frame_rate=45, save_plot=False, savepath='', savedir=''):
     '''Compare average PSTH map across different conditions.'''
-
-    # if len(conditions) > 3:
-    #     raise ValueError('This function only works with 3 conditions for now...')
 
     time_window = time_around * funcimg_frame_rate # frames
     # num_timebins = 2*time_window
@@ -423,15 +538,20 @@ def plot_condition_psth_map(average_psths, conditions, zscoring=True, time_aroun
         if zscoring:
             data[i] = stats.zscore(data[i], axis=1)
 
+    # Find global vmin and vmax across all conditions
+    vmin = min([np.nanmin(d) for d in data])
+    vmax = max([np.nanmax(d) for d in data])
+
     # Sort by different conditions
     for c, condition in enumerate(conditions):
         sortidx = np.argsort(np.argmax(data[c], axis=1))
         
-        fig, ax = plt.subplots(1, len(conditions), figsize=(3*len(conditions),4), sharex=True, sharey=True)
+        im = [[] for _ in range(len(conditions))]
+        fig, ax = plt.subplots(1, len(conditions), figsize=(4*len(conditions),4), sharex=True, sharey=True)
         ax = ax.ravel()
         
         for i in range(len(conditions)):
-            ax[i].imshow(data[i][sortidx, :], aspect='auto')    
+            im[i] = ax[i].imshow(data[i][sortidx, :], aspect='auto', vmin=vmin, vmax=vmax)    
             ax[i].set_xticks([-0.5, num_timebins/2-0.5, num_timebins-0.5])
             if time_around == int(time_around):
                 xticklabels = [int(-time_around), 0, int(time_around)]
@@ -446,6 +566,11 @@ def plot_condition_psth_map(average_psths, conditions, zscoring=True, time_aroun
         ax[0].set_yticks([-0.5, num_neurons-0.5])
         ax[0].set_yticklabels([0, num_neurons])
         ax[0].set_ylabel('Neuron')
+
+        cbar = fig.colorbar(im[-1], ax=ax.ravel().tolist(), shrink=0.6)
+        cbar.set_ticks([vmin, vmax])
+        cbar.ax.set_yticklabels([str(int(round(vmin))), str(int(round(vmax)))], fontsize=8)
+        cbar.set_label(r'z-scored $\Delta$F/F0' if zscoring else r'$\Delta$F/F0', rotation=270, labelpad=10, fontsize=8)
 
         plt.suptitle(f'Sorting by {condition} trials')
 
