@@ -583,15 +583,35 @@ def plot_condition_psth_map(average_psths, conditions, zscoring=True, time_aroun
         
 
 def get_map_correlation(neurons, psths, average_psths, conditions, zscoring=True, reference=0, color_scheme=None, save_plot=False, savepath='', savedir='', filename=''):
-
-    if reference > len(conditions):
-        raise ValueError('The reference data should be within the range of input average PSTHs.')
+    '''
+    Get the firing map correlation among different conditions against a reference. 
+    The correlation for the reference is calculated by randomly selecting half the trials.
+    '''
+    # Check data format
+    if isinstance(average_psths, list):
+        if reference > len(conditions):
+            raise ValueError('The reference data should be within the range of input average PSTHs.')
     
-    data = [average_psths[c] for c in range(len(conditions))]
-    if zscoring:
-        data = stats.zscore(np.array(data), axis=2)
+        data = [average_psths[c] for c in range(len(conditions))]
+        if zscoring:
+            data = stats.zscore(np.array(data), axis=2)
 
-    corrs = [[] for c in range(len(conditions))]
+        data_indices = np.arange(0, len(conditions))
+        ref_cond = reference
+
+    elif isinstance(average_psths, dict):
+        if reference not in average_psths:
+            raise ValueError(f'The reference data should be one of the keys of the data.')
+    
+        data = average_psths.copy()
+        if zscoring:
+            for goal in data.keys():
+                data[goal] = stats.zscore(data[goal], axis=1)
+
+        data_indices = list(data.keys())
+        ref_cond = data_indices.index(reference)
+
+    corrs = [[] for c in data_indices]
 
     # Random half trials 
     num_sort_trials = np.floor(psths[reference].shape[1]/2).astype(int)
@@ -604,18 +624,18 @@ def get_map_correlation(neurons, psths, average_psths, conditions, zscoring=True
     testing_data = np.mean(psths[reference][:, random_rew_test, :], axis=1)
 
     # Calculate correlations
-    for c in range(len(conditions)):
+    for c, idx in enumerate(data_indices):
         for n in range(len(neurons)):
 
-            if c == reference:
+            if idx == reference:
                 if np.all(np.isfinite(sorting_data[n])) and np.all(np.isfinite(sorting_data[n])):
                     r, _ = stats.pearsonr(sorting_data[n], testing_data[n])
                     corrs[c].append(r)
                 else:
                     corrs[c].append(np.nan)
             else:
-                if np.all(np.isfinite(data[reference][n])) and np.all(np.isfinite(data[c][n])):
-                    r, _ = stats.pearsonr(data[reference][n], data[c][n])
+                if np.all(np.isfinite(data[reference][n])) and np.all(np.isfinite(data[idx][n])):
+                    r, _ = stats.pearsonr(data[reference][n], data[idx][n])
                     corrs[c].append(r)
                 else:
                     corrs[c].append(np.nan)
@@ -627,21 +647,21 @@ def get_map_correlation(neurons, psths, average_psths, conditions, zscoring=True
     # === Plotting ===
     labels = []
     for i, cond in enumerate(conditions):
-        labels.append(f"{cond}\nvs\n{conditions[reference]}")
+        if isinstance(average_psths, list):
+            labels.append(f"{cond}\nvs\n{conditions[ref_cond]}")
+        elif isinstance(average_psths, dict):
+            labels.append(f"{cond} vs {conditions[ref_cond]}")
 
     # Compute mean and SEM for each condition's correlations
     bar_data = []
     sem_data = []
     for c in corrs:
         if np.all(np.isnan(c)):
-            bar_data.append(0.0)          # Placeholder bar height
-            sem_data.append(0.0)          # No error bar
+            bar_data.append(0.0)          
+            sem_data.append(0.0)          
         else:
             bar_data.append(np.nanmean(c))
             sem_data.append(stats.sem(c[~np.isnan(c)]) if np.sum(~np.isnan(c)) > 1 else 0)
-
-    # bar_data = [np.nanmean(c) for c in corrs]
-    # sem_data = [stats.sem(c) if len(c) > 1 else 0 for c in corrs]
 
     # Fallback color scheme if none is given
     if color_scheme is None:
