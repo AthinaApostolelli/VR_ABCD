@@ -4,6 +4,7 @@ import os
 import scipy.stats as stats
 import pandas as pd
 import yaml
+import seaborn as sns
 
 
 def get_psth(data, neurons, event_idx, time_around=1, funcimg_frame_rate=45):
@@ -468,6 +469,8 @@ def plot_all_sessions_goal_psth_map(all_average_psths, zscoring=True, sorting_go
 
     num_sessions = len(all_average_psths)
     num_goals = len(all_average_psths[0])  # assuming each session has same number of goals
+    # first_session = next(iter(all_average_psths.values()))
+    # num_goals = len(first_session)  
 
     if num_goals == 4:
         goals = ['A','B','C','D']
@@ -479,11 +482,20 @@ def plot_all_sessions_goal_psth_map(all_average_psths, zscoring=True, sorting_go
 
     # Copy and optionally z-score
     data = []
-    for session in all_average_psths:
-        session_data = {}
-        for goal in session.keys():
-            session_data[goal] = stats.zscore(session[goal], axis=1) if zscoring else session[goal]
-        data.append(session_data)
+    if isinstance(all_average_psths, list):
+        for session in all_average_psths:
+            session_data = {}
+            for goal in session.keys():
+                session_data[goal] = stats.zscore(session[goal], axis=1) if zscoring else session[goal]
+            data.append(session_data)
+
+    elif isinstance(all_average_psths, dict):
+        # Flatten the data
+        for session_id, session in all_average_psths.items():  # <-- Correct
+            session_data = {}
+            for goal in session.keys():
+                session_data[goal] = stats.zscore(session[goal], axis=1) if zscoring else session[goal]
+            data.append(session_data)
 
     # Compute global vmin/vmax
     vmin = min([np.nanmin(session[goal]) for session in data for goal in session.keys()])
@@ -509,6 +521,14 @@ def plot_all_sessions_goal_psth_map(all_average_psths, zscoring=True, sorting_go
                 ax[s,g].set_title(goals[g])
             if g == 0:
                 ax[s,g].set_ylabel(f'Session {s+1}\nNeuron')
+
+    ax[0,0].set_yticks([-0.5, data[s][goal].shape[0]-0.5])
+    ax[0,0].set_yticklabels([0, data[s][goal].shape[0]])
+    ax[0,0].set_ylabel('Neuron')
+
+    ax[1,0].set_yticks([-0.5, data[s][goal].shape[0]-0.5])
+    ax[1,0].set_yticklabels([0, data[s][goal].shape[0]])
+    ax[1,0].set_ylabel('Neuron')
 
     # Add colorbar
     cbar = fig.colorbar(ax[0,0].images[0], ax=ax.ravel().tolist(), shrink=0.6)
@@ -582,50 +602,82 @@ def plot_condition_psth_map(average_psths, conditions, zscoring=True, time_aroun
         plt.show()
         
 
-def get_map_correlation(neurons, psths, average_psths, conditions, zscoring=True, reference=0, color_scheme=None, save_plot=False, savepath='', savedir='', filename=''):
+def get_map_correlation(psths, average_psths, conditions, zscoring=True, reference=0, color_scheme=None, save_plot=False, savepath='', savedir='', filename=''):
     '''
     Get the firing map correlation among different conditions against a reference. 
     The correlation for the reference is calculated by randomly selecting half the trials.
+    NOTE: The reference is the index of the data if the data are a list, or a nested dict (will get flattened into a list), but it is a key of the data if the data are a dict. 
     '''
     # Check data format
     if isinstance(average_psths, list):
         if reference > len(conditions):
             raise ValueError('The reference data should be within the range of input average PSTHs.')
     
-        data = [average_psths[c] for c in range(len(conditions))]
+        average_psth_data = [average_psths[c] for c in range(len(conditions))]
+        psth_data = [psths[c] for c in range(len(conditions))]
         if zscoring:
-            data = stats.zscore(np.array(data), axis=2)
+            average_psth_data = stats.zscore(np.array(average_psth_data), axis=2)
+            # psth_data = stats.zscore(np.array(psth_data), axis=2)
 
         data_indices = np.arange(0, len(conditions))
         ref_cond = reference
 
     elif isinstance(average_psths, dict):
-        if reference not in average_psths:
-            raise ValueError(f'The reference data should be one of the keys of the data.')
+        first_entry = next(iter(average_psths))  
+
+        if isinstance(average_psths[first_entry], dict):
+        
+            # Flatten all data: [(session 0 goal A), (session 0 goal B), ..., (session 1 goal A), ...]
+            average_psth_data = []  
+            psth_data = []  
+            for s in average_psths.keys():
+                for goal in average_psths[s].keys():  
+                    d = average_psths[s][goal]
+                    ref = psths[s][goal]
+                    if zscoring:
+                        d = stats.zscore(d, axis=1)  
+                        # ref = stats.zscore(ref, axis=1)
+                    average_psth_data.append(d)
+                    psth_data.append(ref)
+
+            assert len(average_psth_data) == len(conditions), 'The length of the input data does not match the number of conditions.'
+            
+            # Create array of indexing into the data 
+            data_indices = np.arange(0, len(average_psth_data))
+            if reference not in data_indices:
+                raise ValueError(f'Reference condition {reference} should be within the range of input average PSTHs.')
+            ref_cond = reference
+            
+        else:
+            average_psth_data = average_psths.copy()
+            psth_data = psths.copy()
+            if zscoring:
+                for i in average_psth_data.keys():  
+                    average_psth_data[i] = stats.zscore(average_psth_data[i], axis=1)
+                    # psth_data[i] = stats.zscore(psth_data[i], axis=1)
+
+            data_indices = list(average_psth_data.keys())
+            if reference not in average_psth_data.keys():
+                raise ValueError(f'Reference condition {reference} should be one of the keys of the input dict.')
+            ref_cond = data_indices.index(reference)
+
+    num_neurons = average_psth_data[reference].shape[0]
     
-        data = average_psths.copy()
-        if zscoring:
-            for goal in data.keys():
-                data[goal] = stats.zscore(data[goal], axis=1)
-
-        data_indices = list(data.keys())
-        ref_cond = data_indices.index(reference)
-
     corrs = [[] for c in data_indices]
 
-    # Random half trials 
-    num_sort_trials = np.floor(psths[reference].shape[1]/2).astype(int)
-    event_array = np.arange(0, psths[reference].shape[1])
+    # Split reference PSTH data into random half trials 
+    num_sort_trials = np.floor(psth_data[reference].shape[1]/2).astype(int)
+    event_array = np.arange(0, psth_data[reference].shape[1])
 
     random_rew_sort = np.random.choice(event_array, num_sort_trials, replace=False)  # used for sorting
     random_rew_test = np.setdiff1d(event_array, random_rew_sort)  # used for testing
 
-    sorting_data = np.mean(psths[reference][:, random_rew_sort, :], axis=1)
-    testing_data = np.mean(psths[reference][:, random_rew_test, :], axis=1)
+    sorting_data = np.mean(psth_data[reference][:, random_rew_sort, :], axis=1)
+    testing_data = np.mean(psth_data[reference][:, random_rew_test, :], axis=1)
 
     # Calculate correlations
     for c, idx in enumerate(data_indices):
-        for n in range(len(neurons)):
+        for n in range(num_neurons):
 
             if idx == reference:
                 if np.all(np.isfinite(sorting_data[n])) and np.all(np.isfinite(sorting_data[n])):
@@ -634,8 +686,8 @@ def get_map_correlation(neurons, psths, average_psths, conditions, zscoring=True
                 else:
                     corrs[c].append(np.nan)
             else:
-                if np.all(np.isfinite(data[reference][n])) and np.all(np.isfinite(data[idx][n])):
-                    r, _ = stats.pearsonr(data[reference][n], data[idx][n])
+                if np.all(np.isfinite(average_psth_data[reference][n])) and np.all(np.isfinite(average_psth_data[idx][n])):
+                    r, _ = stats.pearsonr(average_psth_data[reference][n], average_psth_data[idx][n])
                     corrs[c].append(r)
                 else:
                     corrs[c].append(np.nan)
@@ -665,7 +717,6 @@ def get_map_correlation(neurons, psths, average_psths, conditions, zscoring=True
 
     # Fallback color scheme if none is given
     if color_scheme is None:
-        import seaborn as sns
         color_scheme = sns.color_palette("Set2", len(corrs))
     
     fig, ax = plt.subplots(figsize=(len(corrs)+1, 4))
@@ -686,6 +737,68 @@ def get_map_correlation(neurons, psths, average_psths, conditions, zscoring=True
     plt.show()
 
     return corrs
+
+
+def get_map_correlation_matrix(all_average_psths, conditions, zscoring=True, save_plot=False, savepath='', savedir='', filename=''):
+    '''
+    Calculate pairwise PSTH correlation across all sessions and goals.
+    '''
+    num_sessions = len(all_average_psths)
+    num_goals = len(all_average_psths[0])
+
+    # Flatten all data: [(session 0 goal A), (session 0 goal B), ..., (session 1 goal A), ...]
+    data = []
+    for s in range(num_sessions):
+        for goal in sorted(all_average_psths[s].keys()):  # sort to keep order
+            d = all_average_psths[s][goal]
+            if zscoring:
+                d = stats.zscore(d, axis=1)  # z-score along time
+            data.append(d)
+
+    num_conditions = len(data)  # should match len(conditions)
+
+    # Initialize correlation matrix
+    correlation_matrix = np.zeros((num_conditions, num_conditions))
+
+    # Calculate correlations
+    for i in range(num_conditions):
+        for j in range(num_conditions):
+            correlations = []
+            for n in range(data[i].shape[0]):  # loop over neurons
+                if np.all(np.isfinite(data[i][n])) and np.all(np.isfinite(data[j][n])):
+                    r, _ = stats.pearsonr(data[i][n], data[j][n])
+                    correlations.append(r)
+            if correlations:
+                correlation_matrix[i,j] = np.nanmean(correlations)
+            else:
+                correlation_matrix[i,j] = np.nan  # If no valid neurons
+
+    # === Plot ===
+    fig, ax = plt.subplots(figsize=(5,4))
+    im = ax.imshow(correlation_matrix, cmap='viridis', vmin=0, vmax=1)
+
+    # Add colorbar
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label('Mean neuron correlation', fontsize=10)
+
+    # Axis labels
+    ax.set_xticks(np.arange(num_conditions))
+    ax.set_yticks(np.arange(num_conditions))
+    ax.set_xticklabels(conditions, rotation=90)
+    ax.set_yticklabels(conditions)
+    ax.set_title('All Sessions and Goals PSTH Correlation')
+
+    plt.tight_layout()
+
+    if save_plot:
+        output_path = os.path.join(savepath, savedir)
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+        plt.savefig(os.path.join(output_path, f'{filename}.png'))
+
+    plt.show()
+
+    return correlation_matrix
 
 
 def load_vr_session_info(sess_data_path, VR_data=None, options=None):
