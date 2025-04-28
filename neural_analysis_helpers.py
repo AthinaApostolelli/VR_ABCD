@@ -749,13 +749,14 @@ def get_map_correlation_matrix(all_average_psths, conditions, zscoring=True, sav
     # Flatten all data: [(session 0 goal A), (session 0 goal B), ..., (session 1 goal A), ...]
     data = []
     for s in range(num_sessions):
-        for goal in sorted(all_average_psths[s].keys()):  # sort to keep order
+        for goal in all_average_psths[s].keys():  
             d = all_average_psths[s][goal]
             if zscoring:
                 d = stats.zscore(d, axis=1)  # z-score along time
             data.append(d)
 
-    num_conditions = len(data)  # should match len(conditions)
+    num_conditions = len(data)  
+    assert num_conditions == len(data), 'The length of the input data does not match the number of conditions.'
 
     # Initialize correlation matrix
     correlation_matrix = np.zeros((num_conditions, num_conditions))
