@@ -83,7 +83,7 @@ def load_config(base_path):
 def create_session_struct(data,options):
     position = data['Position']
     total_dist = data['TotalRunDistance']
-    time = data['Time'].values
+    time = data['Time']
     licks = np.where(data['Event'] == 'challenged')[0]
     rewards = np.where(data['Event'] == 'rewarded')[0]
     assist_rewards = np.where(data['Event'] == 'assist-rewarded')[0]

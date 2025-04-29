@@ -283,7 +283,6 @@ def extract_barcode(sess_data_path:str,
     output_file = output_path / (output_name + '_barcode')
     np.save(output_file, signals_time_and_bars_array)
     print('Barcode saved!!')
-    print('Note that timestamps are actually just samples now, they will be converted to sec later on if needed. ')
 
     return None
 
