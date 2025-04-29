@@ -32,12 +32,15 @@ def get_psth(data, neurons, event_idx, time_around=1, funcimg_frame_rate=45):
     return psth, average_psth
 
 
-def plot_avg_psth(average_psth, neurons, event='reward', zscoring=True, time_around=1, funcimg_frame_rate=45, save_psth=False, savepath='', filename=''):
+def plot_avg_psth(average_psth, event='reward', zscoring=True, time_around=1, funcimg_frame_rate=45, save_psth=False, savepath='', filename=''):
 
-    time_window = time_around * funcimg_frame_rate # frames
-    num_timebins = 2*time_window
+    if isinstance(time_around, int):
+        time_window = time_around * funcimg_frame_rate
+    else:
+        time_window = int(np.floor(time_around * funcimg_frame_rate))
 
-    num_neurons = len(neurons)
+    num_timebins = average_psth.shape[1]
+    num_neurons = average_psth.shape[0]
 
     # Sort cells according to firing around event
     sortidx = np.argsort(np.argmax(average_psth, axis=1))
@@ -57,7 +60,6 @@ def plot_avg_psth(average_psth, neurons, event='reward', zscoring=True, time_aro
         xticklabels = [round(-time_around, 1), 0, round(time_around, 1)]
     ax.set_xticklabels(xticklabels)
 
-
     ax.set_ylabel('Neuron')
     ax.set_yticks([-0.5, num_neurons-0.5])
     ax.set_yticklabels([0, num_neurons])
@@ -74,12 +76,15 @@ def plot_avg_psth(average_psth, neurons, event='reward', zscoring=True, time_aro
         plt.savefig(os.path.join(savepath, f'{filename}.png'))
 
 
-def split_psth(psth, neurons, event_idx, event='reward', zscoring=True, time_around=1, funcimg_frame_rate=45):
+def split_psth(psth, event_idx, event='reward', zscoring=True, time_around=1, funcimg_frame_rate=45):
 
-    time_window = time_around * funcimg_frame_rate # frames
-    num_timebins = 2*time_window
+    if isinstance(time_around, int):
+        time_window = time_around * funcimg_frame_rate
+    else:
+        time_window = int(np.floor(time_around * funcimg_frame_rate))
 
-    num_neurons = len(neurons)
+    num_timebins = psth.shape[2]
+    num_neurons = psth.shape[0]
     num_events = len(event_idx)
 
     # Split trials in half (randomly) to confirm event tuning
@@ -110,21 +115,26 @@ def split_psth(psth, neurons, event_idx, event='reward', zscoring=True, time_aro
     ax1 = fig.add_subplot(gs[1], sharey=ax0)
     cax = fig.add_subplot(gs[2])
 
-    # fig, ax = plt.subplots(1, 2, figsize=(6,4), sharey=True)
-    # ax = ax.ravel()
-
     im0 = ax0.imshow(sorting_data[sortidx, :], aspect='auto', vmin=vmin, vmax=vmax)
     ax0.vlines(time_window-0.5, ymin=-0.5, ymax=num_neurons-0.5, color='k')
     ax0.set_xlabel('Time')
     ax0.set_xticks([-0.5, num_timebins/2-0.5, num_timebins-0.5])
-    ax0.set_xticklabels([int(-time_around), 0, int(time_around)])
+    if time_around == int(time_around):
+        xticklabels = [int(-time_around), 0, int(time_around)]
+    else:
+        xticklabels = [round(-time_around, 1), 0, round(time_around, 1)]
+    ax0.set_xticklabels(xticklabels)
     ax0.set_title(f'Sorting trials')
 
     im1 = ax1.imshow(testing_data[sortidx, :], aspect='auto', vmin=vmin, vmax=vmax)
     ax1.vlines(time_window-0.5, ymin=-0.5, ymax=num_neurons-0.5, color='k')
     ax1.set_xlabel('Time')
     ax1.set_xticks([-0.5, num_timebins/2-0.5, num_timebins-0.5])
-    ax1.set_xticklabels([int(-time_around), 0, int(time_around)])
+    if time_around == int(time_around):
+        xticklabels = [int(-time_around), 0, int(time_around)]
+    else:
+        xticklabels = [round(-time_around, 1), 0, round(time_around, 1)]
+    ax1.set_xticklabels(xticklabels)    
     ax1.set_title(f'Testing trials')
 
     ax0.set_ylabel('Neuron')
@@ -141,16 +151,19 @@ def split_psth(psth, neurons, event_idx, event='reward', zscoring=True, time_aro
     plt.tight_layout()
 
 
-def get_tuned_neurons(average_psth, neurons, event='reward', time_around=1, funcimg_frame_rate=45, plot_neurons=True):
+def get_tuned_neurons(average_psth, event='reward', time_around=1, funcimg_frame_rate=45, plot_neurons=True):
     # Statistics to find neurons tuned to an event e.g. reward, lick, landmark entry etc.
     # TODO: bootstrapping / permutation test instead? 
 
-    # Mann–Whitney U test comparing the 1-s period just before stimulus onset to the 1-s period directly after stimulus onset. 
+    # Mann–Whitney U test comparing the period just before stimulus onset to the period directly after stimulus onset. 
 
-    time_window = time_around * funcimg_frame_rate # frames
-    num_timebins = 2*time_window
+    if isinstance(time_around, int):
+        time_window = time_around * funcimg_frame_rate
+    else:
+        time_window = int(np.floor(time_around * funcimg_frame_rate))
 
-    num_neurons = len(neurons)
+    num_timebins = average_psth.shape[1]
+    num_neurons = average_psth.shape[0]
 
     before_event_firing = average_psth[:, 0:time_window]
     after_event_firing = average_psth[:, time_window:]
@@ -172,7 +185,11 @@ def get_tuned_neurons(average_psth, neurons, event='reward', time_around=1, func
             ax.axvspan(num_timebins/2, num_timebins, color='gray', alpha=0.5)
             ax.set_xlabel('Time')
             ax.set_xticks([-0.5, num_timebins/2-0.5, num_timebins-0.5])
-            ax.set_xticklabels([int(-time_around), 0, int(time_around)])
+            if time_around == int(time_around):
+                xticklabels = [int(-time_around), 0, int(time_around)]
+            else:
+                xticklabels = [round(-time_around, 1), 0, round(time_around, 1)]
+            ax.set_xticklabels(xticklabels)
             ax.spines[['right', 'top']].set_visible(False)
             ax.set_ylabel('DF/F')
 
@@ -188,7 +205,8 @@ def get_tuned_neurons_shohei(DF_F, average_psth, neurons, event='reward', time_a
     time_window = time_around * funcimg_frame_rate # frames
     time_before = int(np.floor(0.5 * funcimg_frame_rate))
     time_after = int(0.4 * funcimg_frame_rate)
-    num_timebins = 2*time_window
+    num_timebins = average_psth.shape[1]
+    num_neurons = average_psth.shape[0]
 
     num_neurons = len(neurons)
 
@@ -295,11 +313,14 @@ def plot_avg_goal_psth(neurons, event_idxs, psths, average_psths, \
 def get_landmark_psth(data, neurons, event_idx, num_landmarks=10, time_around=1, funcimg_frame_rate=45):
     '''This function is similar to get_psth, but the average PSTH is calculated for each landmark separately.'''
 
+    if isinstance(time_around, int):
+        time_window = time_around * funcimg_frame_rate
+    else:
+        time_window = int(np.floor(time_around * funcimg_frame_rate))
+
+    num_timebins = 2*time_window
     num_neurons = len(neurons)
     num_events = len(event_idx)
-
-    time_window = time_around * funcimg_frame_rate # frames
-    num_timebins = 2*time_window
 
     window_indices = np.add.outer(event_idx, np.arange(-time_window, time_window)).astype(int)  
 
@@ -373,8 +394,12 @@ def plot_landmark_psth_map(average_psth, zscoring=True, sorting_lm=0, num_landma
     if sorting_lm >= num_landmarks:
         raise ValueError(f'The sorting landmark should be one of the {num_landmarks} landmarks.')
     
-    time_window = time_around * funcimg_frame_rate # frames
-    num_timebins = 2*time_window
+    if isinstance(time_around, int):
+        time_window = time_around * funcimg_frame_rate
+    else:
+        time_window = int(np.floor(time_around * funcimg_frame_rate))
+
+    num_timebins = average_psth.shape[2]
 
     fig, ax = plt.subplots(1, 10, figsize=(15,3), sharey=True, sharex=True)
     ax = ax.ravel()
@@ -390,7 +415,11 @@ def plot_landmark_psth_map(average_psth, zscoring=True, sorting_lm=0, num_landma
         ax[i].vlines(time_window-0.5, ymin=-0.5, ymax=data.shape[0]-0.5, color='k', linewidth=0.5)
         ax[i].set_xlabel('Time')
         ax[i].set_xticks([-0.5, num_timebins/2-0.5, num_timebins-0.5])
-        ax[i].set_xticklabels([int(-time_around), 0, int(time_around)])
+        if time_around == int(time_around):
+            xticklabels = [int(-time_around), 0, int(time_around)]
+        else:
+            xticklabels = [round(-time_around, 1), 0, round(time_around, 1)]
+        ax[i].set_xticklabels(xticklabels)
         ax[i].spines[['right', 'top']].set_visible(False)
         ax[i].set_title(f'{i+1}')
 
@@ -823,17 +852,18 @@ def load_vr_session_info(sess_data_path, VR_data=None, options=None):
             # print('Please specify the number of landmarks in the corridor!')  # TODO: read this from config file
     
     #### Deal with VR data from a table with Time, Position, Event, TotalRunDistance
-    position_idx = np.where(VR_data['Position'] > -1)[0]
-    position = VR_data['Position'][position_idx].values 
-    times = VR_data['Time'][position_idx].values
+    _, position, _, total_dist = get_position_info(VR_data)
+    
+    corrected_position = position - np.array(options['flip_tunnel']['margin_start'])
 
     goals = np.array(options['flip_tunnel']['goals']) #- np.array(options['flip_tunnel']['margin_start'])
     landmarks = np.array(options['flip_tunnel']['landmarks']) #- np.array(options['flip_tunnel']['margin_start'])
     tunnel_length = options['flip_tunnel']['length']
 
-    total_dist = VR_data['TotalRunDistance'][position_idx].values #- np.array(options['flip_tunnel']['margin_start'])
     num_laps = np.ceil([total_dist.max()/position.max()])
+    # num_laps = np.ceil([total_dist.max()/corrected_position.max()])
     num_laps = num_laps.astype(int)[0]
+    print(f'{num_laps} laps were completed.')
 
     # find the last landmark that was run through
     last_landmark = np.where(landmarks[:,0] < position[-1])[0][-1]
@@ -945,7 +975,7 @@ def get_landmark_categories(sequence, num_landmarks, all_lms):
 def get_landmark_category_rew_idx(sequence, num_landmarks, landmarks, all_lms, num_laps, VR_data, nidaq_data):
     '''Find indices also in non-goal landmarks corresponding to the same time after landmark entry as mean reward time lag.'''
     
-    reward_idx = get_rewards(VR_data, nidaq_data, print_output=True)
+    reward_idx, _ = get_rewards(VR_data, nidaq_data, print_output=True)
 
     rew_lm_entry_idx, miss_lm_entry_idx, nongoal_lm_entry_idx, test_lm_entry_idx = get_landmark_category_entries(VR_data, nidaq_data, sequence, num_landmarks, all_lms, num_laps, landmarks)
     
@@ -986,7 +1016,7 @@ def get_landmark_category_entries(VR_data, nidaq_data, sequence, num_landmarks, 
 def get_rewarded_landmarks(VR_data, nidaq_data, landmarks, all_lms):
     '''Find the indices of rewarded (lick-triggered) landmarks.'''
 
-    reward_idx = get_rewards(VR_data, nidaq_data, print_output=False)
+    reward_idx, _ = get_rewards(VR_data, nidaq_data, print_output=False)
 
     # Find rewarded landmarks 
     landmark_positions = landmarks[:][0:len(all_lms)]
@@ -1001,18 +1031,11 @@ def get_rewarded_landmarks(VR_data, nidaq_data, landmarks, all_lms):
 def get_rewards(VR_data, nidaq_data, print_output=False):
     '''Find the indices of rewards in the nidaq logging file.'''
 
-    # Find different types of rewards 
-    rewards_root_VR = np.where(VR_data['Event'] == 'rewarded')[0]
-    rewards_VR = VR_data['Index'][rewards_root_VR].values
-
-    assistant_reward_root_idx = np.where(VR_data['Event'] == 'assist-rewarded')[0]
-    assistant_reward_idx = VR_data['Index'][assistant_reward_root_idx].values
-
-    manual_reward_root_idx = np.where(VR_data['Event'] == 'manually-rewarded')[0]
-    manual_reward_idx = VR_data['Index'][manual_reward_root_idx].values
-
+    # Find different types of rewards from VR data
+    rewards_VR, assistant_reward_idx, manual_reward_idx = get_VR_rewards(VR_data)
     all_rewards_VR = np.sort(np.concatenate([rewards_VR, assistant_reward_idx, manual_reward_idx]))
 
+    # Find rewards in NIDAQ data
     reward_idx = np.where(nidaq_data['rewards'] == 1)[0]  
     rewards_to_remove = []
 
@@ -1031,4 +1054,36 @@ def get_rewards(VR_data, nidaq_data, print_output=False):
         print('Total rewards not considered here: ', len(rewards_to_remove))
         print('Total assistant and manual rewards: ', len(assistant_reward_idx) + len(manual_reward_idx))
 
-    return reward_idx
+    return reward_idx, all_rewards_VR
+
+
+def get_VR_rewards(VR_data):
+    '''Find different types of rewards from VR data.'''
+    rewards_root_VR = np.where(VR_data['Event'] == 'rewarded')[0]
+    rewards_VR = VR_data['Index'][rewards_root_VR].values
+
+    assistant_reward_root_idx = np.where(VR_data['Event'] == 'assist-rewarded')[0]
+    assistant_reward_idx = VR_data['Index'][assistant_reward_root_idx].values
+
+    manual_reward_root_idx = np.where(VR_data['Event'] == 'manually-rewarded')[0]
+    manual_reward_idx = VR_data['Index'][manual_reward_root_idx].values
+
+    return rewards_VR, assistant_reward_idx, manual_reward_idx
+
+
+def get_position_info(VR_data):
+    '''Find position, speed, total distance, times from VR data.'''
+    position_idx = np.where(VR_data['Position'] > -1)[0]
+    
+    times = VR_data['Time'][position_idx].values
+
+    position = VR_data['Position'][position_idx].values 
+    total_dist = VR_data['TotalRunDistance'][position_idx].values #- np.array(options['flip_tunnel']['margin_start'])
+
+    if 'Speed' not in VR_data.keys():
+        speed = np.diff(total_dist)/np.diff(times)
+        speed = np.append(speed, speed[-1])
+    else:
+        speed = VR_data['Speed'][position_idx].values
+    
+    return times, position, speed, total_dist
