@@ -853,7 +853,6 @@ def load_vr_session_info(sess_data_path, VR_data=None, options=None):
     
     #### Deal with VR data from a table with Time, Position, Event, TotalRunDistance
     _, position, _, total_dist = get_position_info(VR_data)
-    
     corrected_position = position - np.array(options['flip_tunnel']['margin_start'])
 
     goals = np.array(options['flip_tunnel']['goals']) #- np.array(options['flip_tunnel']['margin_start'])
@@ -901,16 +900,17 @@ def load_vr_session_info(sess_data_path, VR_data=None, options=None):
     return num_landmarks, all_goals, all_lms, total_lm_position, landmarks, start_odour, num_laps
 
 
-def get_lm_entry_exit(num_laps, all_lms, landmarks, positions):
+def get_lm_entry_exit(session, positions):
+
     '''Find data idx closest to landmark entry and exit.'''
 
     lm_entry_idx = []
     lm_exit_idx = []
 
-    if num_laps > 1:
+    if session['num_laps'] > 1:
         search_start = 0  
 
-        for i, (lm_start, lm_end) in enumerate(landmarks[0:len(all_lms)]):
+        for i, (lm_start, lm_end) in enumerate(session['all_landmarks']):
             idx_candidates = np.where((positions[search_start:] >= lm_start) & (positions[search_start:] <= lm_end))[0]
             if len(idx_candidates) > 0:
                 lm_entry_idx.append(idx_candidates[0] + search_start)
@@ -921,15 +921,15 @@ def get_lm_entry_exit(num_laps, all_lms, landmarks, positions):
                 lm_entry_idx.append(None)
 
     else:
-        for lm_start in landmarks[0:len(all_lms)][:,0]:
+        for lm_start in session['all_landmarks'][:,0]:
             lm_entry_idx.append(np.where(positions >= lm_start)[0][0])
             # lm_entry_idx2.append(int(np.argmin(np.abs(positions - lm_start)))) 
 
-        for lm_end in landmarks[0:len(all_lms)][:,1]:
+        for lm_end in session['all_landmarks'][:,1]:
             # lm_exit_idx.append(int(np.argmin(np.abs(positions - lm_end))))
             lm_exit_idx.append(np.where(positions <= lm_end)[0][-1])
 
-    return lm_entry_idx, lm_exit_idx
+    return np.array(lm_entry_idx), np.array(lm_exit_idx)
 
 
 def load_nidaq_behaviour_data(sess_data_path):
@@ -953,7 +953,7 @@ def load_vr_behaviour_data(sess_data_path):
     return VR_data, options
 
 
-def get_landmark_categories(sequence, num_landmarks, all_lms):
+def get_landmark_categories(sequence, num_landmarks, session):
     '''Define which landmarks belong to goals, non-goals and test.'''
 
     if sequence == 'ABAB':
@@ -964,20 +964,20 @@ def get_landmark_categories(sequence, num_landmarks, all_lms):
         test_landmark_id = 8
     non_goal_landmark_id = np.setxor1d(np.arange(0,num_landmarks), np.append(goal_landmark_id, test_landmark_id))
 
-    # Get the landmarks that belong to each condition
-    goals_idx = np.where(np.isin(all_lms, goal_landmark_id))[0]
-    non_goals_idx = np.where(np.isin(all_lms, non_goal_landmark_id))[0]
-    test_idx = np.where(np.isin(all_lms, test_landmark_id))[0]
+    # Get the landmarks that belong to each condition  
+    goals_idx = np.where(np.isin(session['all_lms'], goal_landmark_id))[0]
+    non_goals_idx = np.where(np.isin(session['all_lms'], non_goal_landmark_id))[0]
+    test_idx = np.where(np.isin(session['all_lms'], test_landmark_id))[0]
 
     return goals_idx, non_goals_idx, test_idx
 
 
-def get_landmark_category_rew_idx(sequence, num_landmarks, landmarks, all_lms, num_laps, VR_data, nidaq_data):
+def get_landmark_category_rew_idx(sequence, num_landmarks, session, VR_data, nidaq_data):
     '''Find indices also in non-goal landmarks corresponding to the same time after landmark entry as mean reward time lag.'''
     
-    reward_idx, _ = get_rewards(VR_data, nidaq_data, print_output=True)
+    reward_idx = get_rewards(VR_data, nidaq_data, print_output=True)
 
-    rew_lm_entry_idx, miss_lm_entry_idx, nongoal_lm_entry_idx, test_lm_entry_idx = get_landmark_category_entries(VR_data, nidaq_data, sequence, num_landmarks, all_lms, num_laps, landmarks)
+    rew_lm_entry_idx, miss_lm_entry_idx, nongoal_lm_entry_idx, test_lm_entry_idx = get_landmark_category_entries(VR_data, nidaq_data, sequence, num_landmarks, session)
     
     # Calculate time lag between landmark entry and reward delivery
     rew_time_lag = np.round(np.mean(reward_idx - rew_lm_entry_idx))
@@ -991,16 +991,16 @@ def get_landmark_category_rew_idx(sequence, num_landmarks, landmarks, all_lms, n
     return rew_time_lag, reward_idx, miss_rew_idx, nongoal_rew_idx, test_rew_idx
 
 
-def get_landmark_category_entries(VR_data, nidaq_data, sequence, num_landmarks, all_lms, num_laps, landmarks):
+def get_landmark_category_entries(VR_data, nidaq_data, sequence, num_landmarks, session):
     '''Find the indices of landmark entry for different types of landmarks: rewarded, miss, non-goal, test.'''
     
-    lm_entry_idx, _ = get_lm_entry_exit(num_laps, all_lms, landmarks, positions=nidaq_data['position'])
+    lm_entry_idx, _ = get_lm_entry_exit(session, positions=nidaq_data['position'])
 
     # Find category for each landmark 
-    goals_idx, non_goals_idx, test_idx = get_landmark_categories(sequence, num_landmarks, all_lms)
+    goals_idx, non_goals_idx, test_idx = get_landmark_categories(sequence, num_landmarks, session)
 
     # Find the rewarded landmarks 
-    rewarded_landmarks = get_rewarded_landmarks(VR_data, nidaq_data, landmarks, all_lms)
+    rewarded_landmarks = get_rewarded_landmarks(VR_data, nidaq_data, session)
 
     # Find landmark entry indices for each landmark category
     rew_lm_entry_idx = [lm_entry_idx[i] for i in rewarded_landmarks]
@@ -1008,21 +1008,20 @@ def get_landmark_category_entries(VR_data, nidaq_data, sequence, num_landmarks, 
     nongoal_lm_entry_idx = np.array([lm_entry_idx[i] for i in non_goals_idx])
     test_lm_entry_idx = np.array([lm_entry_idx[i] for i in test_idx])
 
-    assert len(rew_lm_entry_idx) + len(miss_lm_entry_idx) + len(nongoal_lm_entry_idx) + len(test_lm_entry_idx) == len(all_lms), 'Some landmarks have not been considered.'
+    assert len(rew_lm_entry_idx) + len(miss_lm_entry_idx) + len(nongoal_lm_entry_idx) + len(test_lm_entry_idx) == len(session['all_lms']), 'Some landmarks have not been considered.'
 
     return rew_lm_entry_idx, miss_lm_entry_idx, nongoal_lm_entry_idx, test_lm_entry_idx
 
 
-def get_rewarded_landmarks(VR_data, nidaq_data, landmarks, all_lms):
+def get_rewarded_landmarks(VR_data, nidaq_data, session):
     '''Find the indices of rewarded (lick-triggered) landmarks.'''
 
-    reward_idx, _ = get_rewards(VR_data, nidaq_data, print_output=False)
+    reward_idx = get_rewards(VR_data, nidaq_data, print_output=False)
 
     # Find rewarded landmarks 
-    landmark_positions = landmarks[:][0:len(all_lms)]
     reward_positions = nidaq_data['position'][reward_idx]
 
-    rewarded_landmarks = [i for i, (start, end) in enumerate(landmark_positions) 
+    rewarded_landmarks = [i for i, (start, end) in enumerate(session['all_landmarks']) 
                         if np.any((reward_positions >= start) & (reward_positions <= end))]  # TODO: what is wrong with the last reward? 
     
     return rewarded_landmarks
@@ -1054,7 +1053,7 @@ def get_rewards(VR_data, nidaq_data, print_output=False):
         print('Total rewards not considered here: ', len(rewards_to_remove))
         print('Total assistant and manual rewards: ', len(assistant_reward_idx) + len(manual_reward_idx))
 
-    return reward_idx, all_rewards_VR
+    return reward_idx
 
 
 def get_VR_rewards(VR_data):
