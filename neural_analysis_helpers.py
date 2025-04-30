@@ -1067,14 +1067,17 @@ def get_rewards(VR_data, nidaq_data, print_output=False):
 
 def get_VR_rewards(VR_data):
     '''Find different types of rewards from VR data.'''
-    rewards_root_VR = np.where(VR_data['Event'] == 'rewarded')[0]
-    rewards_VR = VR_data['Index'][rewards_root_VR].values
+    # rewards_root_VR = np.where(VR_data['Event'] == 'rewarded')[0]
+    # rewards_VR = VR_data['Index'][rewards_root_VR].values
+    rewards_VR = np.where(VR_data['Event'] == 'rewarded')[0]
 
-    assistant_reward_root_idx = np.where(VR_data['Event'] == 'assist-rewarded')[0]
-    assistant_reward_idx = VR_data['Index'][assistant_reward_root_idx].values
+    # assistant_reward_root_idx = np.where(VR_data['Event'] == 'assist-rewarded')[0]
+    # assistant_reward_idx = VR_data['Index'][assistant_reward_root_idx].values
+    assistant_reward_idx = np.where(VR_data['Event'] == 'assist-rewarded')[0]
 
-    manual_reward_root_idx = np.where(VR_data['Event'] == 'manually-rewarded')[0]
-    manual_reward_idx = VR_data['Index'][manual_reward_root_idx].values
+    # manual_reward_root_idx = np.where(VR_data['Event'] == 'manually-rewarded')[0]
+    # manual_reward_idx = VR_data['Index'][manual_reward_root_idx].values
+    manual_reward_idx = np.where(VR_data['Event'] == 'manually-rewarded')[0]
 
     return rewards_VR, assistant_reward_idx, manual_reward_idx
 
