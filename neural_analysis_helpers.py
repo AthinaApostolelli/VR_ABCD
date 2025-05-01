@@ -47,7 +47,8 @@ def plot_avg_psth(average_psth, event='reward', zscoring=True, time_around=1, fu
 
     data = average_psth.copy()
     if zscoring:
-        data = stats.zscore(data, axis=1)
+        # data = stats.zscore(data, axis=1)
+        data = stats.zscore(data, axis=None)
 
     fig, ax = plt.subplots(figsize=(3,4))
     im = ax.imshow(data[sortidx, :], aspect='auto')
@@ -99,8 +100,10 @@ def split_psth(psth, event_idx, event='reward', zscoring=True, time_around=1, fu
     testing_data = np.mean(psth[:, random_rew_test, :], axis=1)
 
     if zscoring:
-        sorting_data = stats.zscore(sorting_data, axis=1)
-        testing_data = stats.zscore(testing_data, axis=1)
+        # sorting_data = stats.zscore(sorting_data, axis=1)
+        # testing_data = stats.zscore(testing_data, axis=1)
+        sorting_data = stats.zscore(sorting_data, axis=None)
+        testing_data = stats.zscore(testing_data, axis=None)
     
     vmin = min(np.min(sorting_data), np.min(testing_data))
     vmax = max(np.max(sorting_data), np.max(testing_data))
@@ -212,7 +215,8 @@ def get_tuned_neurons_shohei(DF_F, average_psth, neurons, event='reward', time_a
 
     data = average_psth.copy()
     if zscoring:
-        data = stats.zscore(np.array(data), axis=1)
+        # data = stats.zscore(np.array(data), axis=1)
+        data = stats.zscore(np.array(data), axis=None)
 
     before_firing = data[:, time_before:time_window]
     after_firing = data[:, time_window+time_after:]
@@ -336,6 +340,37 @@ def get_landmark_psth(data, neurons, event_idx, num_landmarks=10, time_around=1,
     return psth, average_landmark_psth
 
 
+def get_landmark_id_psth(data, neurons, event_idx, session, num_landmarks=2, time_around=1, funcimg_frame_rate=45):
+    '''This function is similar to get_psth, but the average PSTH is calculated for each landmark separately.'''
+
+    assert num_landmarks == 2, 'This function only deals with 2 landmark sequences.'
+
+    if isinstance(time_around, int):
+        time_window = time_around * funcimg_frame_rate
+    else:
+        time_window = int(np.floor(time_around * funcimg_frame_rate))
+
+    num_timebins = 2*time_window
+    num_neurons = len(neurons)
+    num_events = len(event_idx)
+
+    window_indices = np.add.outer(event_idx, np.arange(-time_window, time_window)).astype(int)  
+
+    psth = np.zeros((num_neurons, num_events, num_timebins))
+    for n, neuron in enumerate(neurons):
+        psth[n, :, :] = data[neuron, window_indices]
+
+    # Average PSTH for all events per landmark
+    average_landmark_psth = np.zeros([num_neurons, num_landmarks, num_timebins])
+    for i in range(num_landmarks):
+        if i == 0:
+            average_landmark_psth[:, i, :] = np.mean(psth[:, session['goals_idx'], :], axis=1)
+        elif i == 1:
+            average_landmark_psth[:, i, :] = np.mean(psth[:, session['non_goals_idx'], :], axis=1)
+
+    return psth, average_landmark_psth
+
+
 def plot_avg_landmark_psth(neurons, psth, average_psth, num_landmarks=10, time_around=1, funcimg_frame_rate=45, \
                            plot_all_neurons=False, save_plot=False, savepath='', savedir=''):
     
@@ -388,7 +423,7 @@ def plot_avg_landmark_psth(neurons, psth, average_psth, num_landmarks=10, time_a
             plt.suptitle(f'Neuron {neuron}')
 
 
-def plot_landmark_psth_map(average_psth, zscoring=True, sorting_lm=0, num_landmarks=10, time_around=1, funcimg_frame_rate=45, save_plot=False, savepath='', savedir='', filename=''):
+def plot_landmark_psth_map(average_psth, session, zscoring=True, sorting_lm=0, num_landmarks=10, time_around=1, funcimg_frame_rate=45, save_plot=False, savepath='', savedir='', filename=''):
     '''Plot firing maps of all selected neurons for all landmarks, sorted by specific landmark.'''
 
     if sorting_lm >= num_landmarks:
@@ -401,17 +436,21 @@ def plot_landmark_psth_map(average_psth, zscoring=True, sorting_lm=0, num_landma
 
     num_timebins = average_psth.shape[2]
 
-    fig, ax = plt.subplots(1, 10, figsize=(15,3), sharey=True, sharex=True)
+    fig, ax = plt.subplots(1, num_landmarks, figsize=(num_landmarks*1.5+2,3), sharey=True, sharex=True)
     ax = ax.ravel()
 
     data = average_psth.copy()
     if zscoring:
-        data = stats.zscore(data, axis=1)
-    
+        # data = stats.zscore(data, axis=1)
+        data = stats.zscore(data, axis=None)
+
+    vmin = min([np.nanmin(data)])
+    vmax = max([np.nanmax(data)])
+
     sortidx = np.argsort(np.argmax(data[:, sorting_lm, :], axis=1))
 
     for i in range(num_landmarks):
-        ax[i].imshow(data[sortidx, i, :], aspect='auto')
+        img = ax[i].imshow(data[sortidx, i, :], aspect='auto', vmin=vmin, vmax=vmax)
         ax[i].vlines(time_window-0.5, ymin=-0.5, ymax=data.shape[0]-0.5, color='k', linewidth=0.5)
         ax[i].set_xlabel('Time')
         ax[i].set_xticks([-0.5, num_timebins/2-0.5, num_timebins-0.5])
@@ -421,12 +460,22 @@ def plot_landmark_psth_map(average_psth, zscoring=True, sorting_lm=0, num_landma
             xticklabels = [round(-time_around, 1), 0, round(time_around, 1)]
         ax[i].set_xticklabels(xticklabels)
         ax[i].spines[['right', 'top']].set_visible(False)
-        ax[i].set_title(f'{i+1}')
+        if num_landmarks == 10:
+            ax[i].set_title(f'{i+1}')
+        else:
+            lm = session['all_lms'][session['goals_idx'][0]] if i == 0 else session['all_lms'][session['non_goals_idx'][0]] 
+            ax[i].set_title(f'{lm+1}')
 
     ax[0].set_yticks([-0.5, data.shape[0]-0.5])
     ax[0].set_yticklabels([0, data.shape[0]])
-    ax[0].set_ylabel('Neuron')
-    plt.tight_layout()
+    ax[0].set_ylabel('Neuron', labelpad=-10)
+    
+    cbar = fig.colorbar(img, ax=ax.ravel().tolist(), shrink=0.6, pad=0.02)
+    cbar.set_ticks([vmin, vmax])
+    cbar.ax.set_yticklabels([str(int(round(vmin))), str(int(round(vmax)))], fontsize=8)
+    cbar.set_label(r'z-scored $\Delta$F/F0' if zscoring else r'$\Delta$F/F0', rotation=270, labelpad=10, fontsize=8)
+
+    # plt.tight_layout()
 
     if save_plot:
         output_path = os.path.join(savepath, savedir)
@@ -454,8 +503,9 @@ def plot_goal_psth_map(average_psths, zscoring=True, sorting_goal=1, time_around
     data = average_psths.copy()
     if zscoring:
         for goal in data.keys():
-            data[goal] = stats.zscore(data[goal], axis=1)
-    
+            # data[goal] = stats.zscore(data[goal], axis=1)
+            data[goal] = stats.zscore(data[goal], axis=None)
+
     # Find global vmin and vmax across all goals
     vmin = min([np.nanmin(arr) for arr in data.values()])
     vmax = max([np.nanmax(arr) for arr in data.values()])
@@ -585,11 +635,12 @@ def plot_condition_psth_map(average_psths, conditions, zscoring=True, time_aroun
     for i in range(len(conditions)):
         data[i] = average_psths[i].copy()
         if zscoring:
-            data[i] = stats.zscore(data[i], axis=1)
+            # data[i] = stats.zscore(data[i], axis=1)
+            data[i] = stats.zscore(data[i], axis=None)
 
     # Find global vmin and vmax across all conditions
-    vmin = min([np.nanmin(d) for d in data])
-    vmax = max([np.nanmax(d) for d in data])
+    vmin = min([np.nanmin(d) for d in data if d.size > 0])
+    vmax = max([np.nanmax(d) for d in data if d.size > 0])
 
     # Sort by different conditions
     for c, condition in enumerate(conditions):
@@ -642,11 +693,15 @@ def get_map_correlation(psths, average_psths, conditions, zscoring=True, referen
         if reference > len(conditions):
             raise ValueError('The reference data should be within the range of input average PSTHs.')
     
-        average_psth_data = [average_psths[c] for c in range(len(conditions))]
+        average_psth_data = []
         psth_data = [psths[c] for c in range(len(conditions))]
         if zscoring:
-            average_psth_data = stats.zscore(np.array(average_psth_data), axis=2)
+            # average_psth_data = stats.zscore(np.array(average_psth_data), axis=2)
+            for c in range(len(conditions)):
+                average_psth_data.append(stats.zscore(np.array(average_psths[c]), axis=None))
             # psth_data = stats.zscore(np.array(psth_data), axis=2)
+        else: 
+            average_psth_data = [average_psths[c] for c in range(len(conditions))]
 
         data_indices = np.arange(0, len(conditions))
         ref_cond = reference
@@ -664,7 +719,8 @@ def get_map_correlation(psths, average_psths, conditions, zscoring=True, referen
                     d = average_psths[s][goal]
                     ref = psths[s][goal]
                     if zscoring:
-                        d = stats.zscore(d, axis=1)  
+                        # d = stats.zscore(d, axis=1)  
+                        d = stats.zscore(d, axis=None)  
                         # ref = stats.zscore(ref, axis=1)
                     average_psth_data.append(d)
                     psth_data.append(ref)
@@ -682,7 +738,8 @@ def get_map_correlation(psths, average_psths, conditions, zscoring=True, referen
             psth_data = psths.copy()
             if zscoring:
                 for i in average_psth_data.keys():  
-                    average_psth_data[i] = stats.zscore(average_psth_data[i], axis=1)
+                    # average_psth_data[i] = stats.zscore(average_psth_data[i], axis=1)
+                    average_psth_data[i] = stats.zscore(average_psth_data[i], axis=None)
                     # psth_data[i] = stats.zscore(psth_data[i], axis=1)
 
             data_indices = list(average_psth_data.keys())
@@ -781,7 +838,8 @@ def get_map_correlation_matrix(all_average_psths, conditions, zscoring=True, sav
         for goal in all_average_psths[s].keys():  
             d = all_average_psths[s][goal]
             if zscoring:
-                d = stats.zscore(d, axis=1)  # z-score along time
+                # d = stats.zscore(d, axis=1)  # z-score along time
+                d = stats.zscore(d, axis=None)
             data.append(d)
 
     num_conditions = len(data)  
