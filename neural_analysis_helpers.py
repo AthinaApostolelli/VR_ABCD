@@ -960,24 +960,22 @@ def get_landmark_categories(sequence, num_landmarks, session):
         if sequence == 'ABAB':
             goal_landmark_id = [1, 3, 5, 7]
             test_landmark_id = 9
-        elif sequence == 'AABB':  # TODO
+        elif sequence == 'AABB':  
             goal_landmark_id = [0, 1, 4, 5]
             test_landmark_id = 8
         non_goal_landmark_id = np.setxor1d(np.arange(0,num_landmarks), np.append(goal_landmark_id, test_landmark_id))
-
-        # Get the landmarks that belong to each condition  
-        goals_idx = np.where(np.isin(session['all_lms'], goal_landmark_id))[0]
-        non_goals_idx = np.where(np.isin(session['all_lms'], non_goal_landmark_id))[0]
-        test_idx = np.where(np.isin(session['all_lms'], test_landmark_id))[0]
-
+ 
     elif num_landmarks == 2:    # T3 and T4
-        if sequence == 'ABAB':
-            goal_landmark_id = [1, 3]
-            # test_landmark_id = 9
-        elif sequence == 'AABB':  # TODO
-            goal_landmark_id = [0, 1]
-            # test_landmark_id = 8 
-        # elif sequence == 'AB_shuffled':     
+        lms = np.unique(session['all_lms'])
+        goal_landmark_id = session['all_lms'][session['goal_idx'][0]]
+        non_goal_landmark_id = np.setdiff1d(lms, goal_landmark_id)[0]
+        test_landmark_id = None
+
+    # Get the landmarks that belong to each condition  
+    goals_idx = np.where(np.isin(session['all_lms'], goal_landmark_id))[0]
+    non_goals_idx = np.where(np.isin(session['all_lms'], non_goal_landmark_id))[0]
+    test_idx = np.where(np.isin(session['all_lms'], test_landmark_id))[0] if test_landmark_id is None else None
+    
     return goals_idx, non_goals_idx, test_idx
 
 
