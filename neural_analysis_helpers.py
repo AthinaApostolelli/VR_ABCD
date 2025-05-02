@@ -469,7 +469,7 @@ def plot_landmark_psth_map(average_psth, session, zscoring=True, sorting_lm=0, n
     ax[0].set_yticks([-0.5, data.shape[0]-0.5])
     ax[0].set_yticklabels([0, data.shape[0]])
     ax[0].set_ylabel('Neuron', labelpad=-10)
-    
+
     cbar = fig.colorbar(img, ax=ax.ravel().tolist(), shrink=0.6, pad=0.02)
     cbar.set_ticks([vmin, vmax])
     cbar.ax.set_yticklabels([str(int(round(vmin))), str(int(round(vmax)))], fontsize=8)
@@ -694,14 +694,17 @@ def get_map_correlation(psths, average_psths, conditions, zscoring=True, referen
             raise ValueError('The reference data should be within the range of input average PSTHs.')
     
         average_psth_data = []
-        psth_data = [psths[c] for c in range(len(conditions))]
+        psth_data = []
+        # psth_data = [psths[c] for c in range(len(conditions))]
         if zscoring:
             # average_psth_data = stats.zscore(np.array(average_psth_data), axis=2)
             for c in range(len(conditions)):
                 average_psth_data.append(stats.zscore(np.array(average_psths[c]), axis=None))
             # psth_data = stats.zscore(np.array(psth_data), axis=2)
+                psth_data.append(stats.zscore(np.array(psths[c]), axis=None))
         else: 
             average_psth_data = [average_psths[c] for c in range(len(conditions))]
+            psth_data = [psths[c] for c in range(len(conditions))]
 
         data_indices = np.arange(0, len(conditions))
         ref_cond = reference
@@ -722,6 +725,7 @@ def get_map_correlation(psths, average_psths, conditions, zscoring=True, referen
                         # d = stats.zscore(d, axis=1)  
                         d = stats.zscore(d, axis=None)  
                         # ref = stats.zscore(ref, axis=1)
+                        ref = stats.zscore(ref, axis=None)
                     average_psth_data.append(d)
                     psth_data.append(ref)
 
@@ -741,6 +745,7 @@ def get_map_correlation(psths, average_psths, conditions, zscoring=True, referen
                     # average_psth_data[i] = stats.zscore(average_psth_data[i], axis=1)
                     average_psth_data[i] = stats.zscore(average_psth_data[i], axis=None)
                     # psth_data[i] = stats.zscore(psth_data[i], axis=1)
+                    psth_data[i] = stats.zscore(psth_data[i], axis=None)
 
             data_indices = list(average_psth_data.keys())
             if reference not in average_psth_data.keys():
