@@ -91,8 +91,7 @@ def roicat_align_rois(roicat_dir, roicat_data_name, sessions_to_align, basepath,
     else:
         if not os.path.exists(savepath):
             os.makedirs(savepath)
-    filename = f"roicat_aligned_ROIs_{'_'.join(['t' + str(n) for n in protocol_nums])}.npy"
-    np.save(os.path.join(savepath, filename), idx_original_aligned)
+    np.save(os.path.join(savepath, f'roicat_aligned_ROIs_{'_'.join(f't{n}' for n in protocol_nums)}.npy'), idx_original_aligned)
 
     return data_aligned_masked, idx_original_aligned
 
@@ -100,14 +99,9 @@ def roicat_align_rois(roicat_dir, roicat_data_name, sessions_to_align, basepath,
 # def roicat_track_rois(): 
 #     # TODO 
 
-def roicat_visualize_tracked_rois(roicat_dir, roicat_data_name, sessions_to_align, tracked_neuron_ids=None):
-    '''Visualize the alignment of tracked ROIs. For more details look at the ROICaT documentation https://roicat.readthedocs.io/en/latest/index.html.'''
+def roicat_visualize_rois(roicat_dir, roicat_data_name, sessions_to_align):
+    '''Visualize the ROI alignment. For more details look at the ROICaT documentation https://roicat.readthedocs.io/en/latest/index.html.'''
 
-    # Handle single or multiple sessions
-    if isinstance(sessions_to_align, str):
-        sessions_to_align = [sessions_to_align]
-
-    # Now this will always work
     protocol_nums = [int(re.search(r'protocol-t(\d+)', s).group(1)) for s in sessions_to_align]
 
     # Data paths ROICaT
@@ -122,28 +116,17 @@ def roicat_visualize_tracked_rois(roicat_dir, roicat_data_name, sessions_to_alig
     ROICaT_results = roicat.util.RichFile_ROICaT(path=paths_save['results_all'])
 
     labels_bySession = ROICaT_results['clusters']['labels_bySession'].load()
-    roi_labels = [labels_bySession[i] for i in protocol_nums]
+    roi_labels = [rois for rois in labels_bySession[protocol_nums[0]:protocol_nums[-1]+1]]  
 
     ROIs = ROICaT_results['ROIs'].load()
-    rois = [ROIs['ROIs_aligned'][i] for i in protocol_nums]
 
-    # Only visualize the tracked neurons 
-    if tracked_neuron_ids is not None:
-        roi_labels = [
-            np.array(session_labels)[valid_ids]
-            for session_labels, valid_ids in zip(roi_labels, tracked_neuron_ids)]
-
-        rois = [session_labels[valid_ids] for session_labels, valid_ids in zip(rois, tracked_neuron_ids)]
-
-    # Find clusters
     FOV_clusters = roicat.visualization.compute_colored_FOV(
-        spatialFootprints=[r.power(1.0) for r in rois],  ## Spatial footprint sparse arrays
+        spatialFootprints=[r.power(1.0) for r in np.array(ROIs['ROIs_aligned'])[protocol_nums]],  ## Spatial footprint sparse arrays
         FOV_height=ROIs['frame_height'],
         FOV_width=ROIs['frame_width'],
         labels=roi_labels
     )
 
-    # Visualize ROIs
     roicat.visualization.display_toggle_image_stack(
         FOV_clusters, 
         image_size=1.5,

@@ -104,11 +104,11 @@ def roicat_visualize_tracked_rois(roicat_dir, roicat_data_name, sessions_to_alig
     '''Visualize the alignment of tracked ROIs. For more details look at the ROICaT documentation https://roicat.readthedocs.io/en/latest/index.html.'''
 
     # Handle single or multiple sessions
-    if isinstance(sessions_to_align, str):
-        sessions_to_align = [sessions_to_align]
+    if len(sessions_to_align) == 1:
+        protocol_nums = [int(re.search(r'protocol-t(\d+)', sessions_to_align).group(1))]
+    else:
+        protocol_nums = [int(re.search(r'protocol-t(\d+)', s).group(1)) for s in sessions_to_align]
 
-    # Now this will always work
-    protocol_nums = [int(re.search(r'protocol-t(\d+)', s).group(1)) for s in sessions_to_align]
 
     # Data paths ROICaT
     paths_save = {
