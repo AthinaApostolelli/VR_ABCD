@@ -4,15 +4,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import roicat
 import scipy.sparse
-from typing import Union, Optional
+from typing import Union
 import collections
 import json
-from roicat import helpers
-# import richfile as rf
-import torch 
-import pandas as pd 
-import pickle
-
 
 def roicat_align_rois(roicat_dir, roicat_data_name, sessions_to_align, basepath, animal, alignment_method='F', data=None, plot_alignment=False, savepath=''):
     '''Align the neural data according to the ROI they belong to, 
@@ -117,6 +111,7 @@ def roicat_visualize_tracked_rois(roicat_dir, roicat_data_name, sessions_to_alig
     if isinstance(sessions_to_align, str):
         sessions_to_align = [sessions_to_align]
 
+    # Now this will always work
     protocol_nums = [int(re.search(r'protocol-t(\d+)', s).group(1)) for s in sessions_to_align]
 
     # Data paths ROICaT
@@ -128,6 +123,8 @@ def roicat_visualize_tracked_rois(roicat_dir, roicat_data_name, sessions_to_alig
     }
 
     # Find session index 
+    # ROICaT_results = load_sparse_array(path=paths_save['results_all'])
+    # ROICaT_results = load_json_dict(path=paths_save['results_all'])
     ROICaT_results = roicat.util.RichFile_ROICaT(path=paths_save['results_all'])
 
     labels_bySession = ROICaT_results['clusters']['labels_bySession'].load()
@@ -159,25 +156,42 @@ def roicat_visualize_tracked_rois(roicat_dir, roicat_data_name, sessions_to_alig
     )
 
 
-if __name__ == '__main__':
-    function_name = sys.argv[1]  
-    args = sys.argv[2:]
+def load_sparse_array(
+    path: Union[str, Path],
+    **kwargs,
+) -> scipy.sparse.csr_matrix:
+    """
+    Loads a sparse array from the given path.
+    """        
+    return scipy.sparse.load_npz(path, **kwargs)
 
-    if function_name == 'roicat_align_rois':
-        data_aligned_masked, idx_original_aligned = roicat_align_rois(*args)
-        
-    elif function_name == 'roicat_visualize_tracked_rois':
-        args = json.loads(sys.argv[2])
-        roicat_visualize_tracked_rois(
-            args["roicat_dir"],
-            args["roicat_data_name"],
-            args["sessions_to_align"],
-            args.get("tracked_neuron_ids")  # Optional
-        )
 
-    else:
-        print("Function not found!")
-
+def load_json_dict(
+    path: Union[str, Path],
+    **kwargs,
+) -> collections.UserDict:
+    """
+    Loads a dictionary from the given path.
+    """
+    with open(path, 'r') as f:
+        return JSON_Dict(json.load(f, **kwargs))
     
+
+class JSON_Dict(dict):
+    def __init__(self, *args, **kwargs):
+        super(JSON_Dict, self).__init__(*args, **kwargs)
+
+
+if __name__ == '__main__':
+
+    data_aligned_masked, idx_original_aligned = roicat_align_rois(roicat_dir=r'/Users/athinaapostolelli/Documents/SWC/VR_ABCD/ROICaT',
+                      roicat_data_name='TAA0000066',
+                      sessions_to_align=['ses-011_date-20250315_protocol-t5', 'ses-012_date-20250318_protocol-t6'],
+                      basepath=Path('/Volumes/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2'),
+                      animal='TAA0000066',
+                      alignment_method='DF_F0',
+                      data=None,
+                      plot_alignment=False,
+                      savepath='')
     
 

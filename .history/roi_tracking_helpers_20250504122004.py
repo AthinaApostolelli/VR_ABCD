@@ -167,13 +167,18 @@ if __name__ == '__main__':
         data_aligned_masked, idx_original_aligned = roicat_align_rois(*args)
         
     elif function_name == 'roicat_visualize_tracked_rois':
-        args = json.loads(sys.argv[2])
+        roicat_dir = sys.argv[2]
+        roicat_data_name = sys.argv[3]
+        session = sys.argv[4]
+        tracked_ids = json.loads(sys.argv[5])  
+
         roicat_visualize_tracked_rois(
-            args["roicat_dir"],
-            args["roicat_data_name"],
-            args["sessions_to_align"],
-            args.get("tracked_neuron_ids")  # Optional
+            roicat_dir,
+            roicat_data_name,
+            sessions_to_align=session,
+            tracked_neuron_ids=tracked_ids
         )
+        # roicat_visualize_tracked_rois(*args)
 
     else:
         print("Function not found!")

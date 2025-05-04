@@ -117,6 +117,7 @@ def roicat_visualize_tracked_rois(roicat_dir, roicat_data_name, sessions_to_alig
     if isinstance(sessions_to_align, str):
         sessions_to_align = [sessions_to_align]
 
+    # Now this will always work
     protocol_nums = [int(re.search(r'protocol-t(\d+)', s).group(1)) for s in sessions_to_align]
 
     # Data paths ROICaT
@@ -160,20 +161,14 @@ def roicat_visualize_tracked_rois(roicat_dir, roicat_data_name, sessions_to_alig
 
 
 if __name__ == '__main__':
-    function_name = sys.argv[1]  
+    function_name = sys.argv[1]  # Get the function name from the arguments passed
     args = sys.argv[2:]
 
     if function_name == 'roicat_align_rois':
         data_aligned_masked, idx_original_aligned = roicat_align_rois(*args)
         
     elif function_name == 'roicat_visualize_tracked_rois':
-        args = json.loads(sys.argv[2])
-        roicat_visualize_tracked_rois(
-            args["roicat_dir"],
-            args["roicat_data_name"],
-            args["sessions_to_align"],
-            args.get("tracked_neuron_ids")  # Optional
-        )
+        roicat_visualize_tracked_rois(*args)
 
     else:
         print("Function not found!")
