@@ -878,6 +878,7 @@ def get_map_correlation_matrix(all_average_psths, conditions, zscoring=True, sav
     cbar.set_label('Mean neuron correlation', fontsize=10, rotation=270)
     cbar.set_ticks([0, 1])
     cbar.set_ticklabels(['0', '1'])
+
     ax.set_title('All Sessions and Goals PSTH Correlation')
 
     plt.tight_layout()

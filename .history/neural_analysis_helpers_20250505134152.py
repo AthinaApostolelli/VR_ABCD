@@ -543,10 +543,9 @@ def plot_goal_psth_map(average_psths, zscoring=True, sorting_goal=1, time_around
         plt.show()
 
 
-def plot_all_sessions_goal_psth_map(all_average_psths, conditions, zscoring=True, ref_session=0, sorting_goal=1, time_around=1, funcimg_frame_rate=45, save_plot=False, savepath='', savedir='', filename=''):
+def plot_all_sessions_goal_psth_map(all_average_psths, conditions, zscoring=True, sorting_goal=1, time_around=1, funcimg_frame_rate=45, save_plot=False, savepath='', savedir='', filename=''):
     '''Plot firing maps for all sessions and each goal, sorted by a specific goal.'''
 
-    assert sorting_goal in all_average_psths[ref_session], 'This goal does not exist in the reference session.'
     time_window = time_around * funcimg_frame_rate # frames
     num_timebins = 2*time_window
 
@@ -574,15 +573,14 @@ def plot_all_sessions_goal_psth_map(all_average_psths, conditions, zscoring=True
     vmax = max([np.nanmax(session[goal]) for session in data for goal in session.keys()])
 
     # Sort neurons consistently across sessions (using sorting_goal)
-    sortidx = np.argsort(np.argmax(data[ref_session][sorting_goal], axis=1))  # reference the first session for sorting
+    sortidx = np.argsort(np.argmax(data[0][sorting_goal], axis=1))  # reference the first session for sorting
 
     # Set up figure
     # Determine the number of sessions and max number of goals
     num_sessions = len(all_average_psths)
     goals_per_session = [sorted(data[s].keys()) for s in range(num_sessions)]
     max_goals = max(len(goals) for goals in goals_per_session)
-    goal_label_map = {1: 'A', 2: 'B', 3: 'C', 4: 'D', '1': 'A', '2': 'B', '3': 'C', '4': 'D', 'A': 'A', 'B': 'B', 'C': 'C', 'D': 'D'}
-    protocol_nums = sorted(set([cond.split()[0] for cond in conditions]))
+    goals = [cond.split()[-1] for cond in conditions]
 
     fig, ax = plt.subplots(num_sessions, max_goals, figsize=(3*max_goals, 3*num_sessions), sharex=True, sharey=True)
 
@@ -602,20 +600,55 @@ def plot_all_sessions_goal_psth_map(all_average_psths, conditions, zscoring=True
                 xticklabels = [round(-time_around, 1), 0, round(time_around, 1)]
             ax[s, g].set_xticklabels(xticklabels)
             ax[s, g].spines[['right', 'top']].set_visible(False)
-            ax[s, g].set_title(goal_label_map.get(goal, str(goal)))
+            ax[s, g].set_title(goals[g])
             if g == 0:
-                ax[s, g].set_ylabel(f'{protocol_nums[s]}\nNeuron', labelpad=-5)
-        ax[s,0].set_yticks([-0.5, data[ref_session][goals_per_session[0][0]].shape[0]-0.5])  
-        ax[s,0].set_yticklabels([0, data[ref_session][goals_per_session[0][0]].shape[0]])
+                ax[s, g].set_ylabel(f'Session {s+1}\nNeuron')
 
         # Hide unused axes in that row
         for g_unused in range(len(goals_per_session[s]), max_goals):
             ax[s, g_unused].axis('off')
 
+    # Y-axis ticks and labels on the first column (if it exists)
+    if max_goals > 0:
+        ax[0,0].set_yticks([-0.5, data[0][goals_per_session[0][0]].shape[0]-0.5])
+        ax[0,0].set_yticklabels([0, data[0][goals_per_session[0][0]].shape[0]])
+        ax[0,0].set_ylabel('Neuron')
+
     cbar = fig.colorbar(ax[0,0].images[0], ax=ax.ravel().tolist(), shrink=0.6)
     cbar.set_ticks([vmin, vmax])
     cbar.ax.set_yticklabels([str(int(round(vmin))), str(int(round(vmax)))], fontsize=8)
     cbar.set_label(r'z-scored $\Delta$F/F0' if zscoring else r'$\Delta$F/F0', rotation=270, labelpad=0, fontsize=8)
+
+    # fig, ax = plt.subplots(num_sessions, num_goals, figsize=(3*num_goals, 3*num_sessions), sharex=True, sharey=True)
+    # if num_sessions == 1 or num_goals == 1:
+    #     ax = np.atleast_2d(ax)
+    # ax = np.array(ax)
+
+    # for s in range(num_sessions):
+    #     for g, goal in enumerate(sorted(data[s].keys())):
+    #         ax[s,g].imshow(data[s][goal][sortidx, :], aspect='auto', vmin=vmin, vmax=vmax)
+    #         ax[s,g].vlines(time_window-0.5, ymin=-0.5, ymax=data[s][goal].shape[0]-0.5, color='k', linewidth=0.5)
+    #         ax[s,g].set_xticks([-0.5, num_timebins/2-0.5, num_timebins-0.5])
+    #         ax[s,g].set_xticklabels([int(-time_around), 0, int(time_around)])
+    #         ax[s,g].spines[['right', 'top']].set_visible(False)
+    #         if s == 0:
+    #             ax[s,g].set_title(goals[g])
+    #         if g == 0:
+    #             ax[s,g].set_ylabel(f'Session {s+1}\nNeuron')
+
+    # ax[0,0].set_yticks([-0.5, data[s][goal].shape[0]-0.5])
+    # ax[0,0].set_yticklabels([0, data[s][goal].shape[0]])
+    # ax[0,0].set_ylabel('Neuron')
+
+    # ax[1,0].set_yticks([-0.5, data[s][goal].shape[0]-0.5])
+    # ax[1,0].set_yticklabels([0, data[s][goal].shape[0]])
+    # ax[1,0].set_ylabel('Neuron')
+
+    # # Add colorbar
+    # cbar = fig.colorbar(ax[0,0].images[0], ax=ax.ravel().tolist(), shrink=0.6)
+    # cbar.set_ticks([vmin, vmax])
+    # cbar.ax.set_yticklabels([str(int(round(vmin))), str(int(round(vmax)))], fontsize=8)
+    # cbar.set_label(r'z-scored $\Delta$F/F0' if zscoring else r'$\Delta$F/F0', rotation=270, labelpad=10, fontsize=8)
 
     if save_plot:
         output_path = os.path.join(savepath, savedir)
@@ -688,7 +721,7 @@ def get_map_correlation(psths, average_psths, conditions, zscoring=True, referen
     '''
     Get the firing map correlation among different conditions against a reference. 
     The correlation for the reference is calculated by randomly selecting half the trials.
-    NOTE: The reference is the index of the data if the data are either a list or a nested dict (will get flattened into a list), but it is a key of the data if the data are a dict. 
+    NOTE: The reference is the index of the data if the data are a list, or a nested dict (will get flattened into a list), but it is a key of the data if the data are a dict. 
     '''
     # Check data format
     if isinstance(average_psths, list):
@@ -837,6 +870,7 @@ def get_map_correlation_matrix(all_average_psths, conditions, zscoring=True, sav
     Calculate pairwise PSTH correlation across all sessions and goals.
     '''
     num_sessions = len(all_average_psths)
+    num_goals = len(all_average_psths[0])
 
     # Flatten all data: [(session 0 goal A), (session 0 goal B), ..., (session 1 goal A), ...]
     data = []
@@ -869,15 +903,17 @@ def get_map_correlation_matrix(all_average_psths, conditions, zscoring=True, sav
 
     # === Plot ===
     fig, ax = plt.subplots(figsize=(5,4))
-    im = sns.heatmap(correlation_matrix, annot=True, fmt=".2f", cmap='viridis', vmin=0, vmax=1,
-            cbar_kws={'label': 'Mean neuron correlation'}, cbar=False, square=True, annot_kws={"size": 8}, 
-            xticklabels=[f"{c}" for c in conditions],
-            yticklabels=[f"{c}" for c in conditions])
+    im = ax.imshow(correlation_matrix, cmap='viridis', vmin=0, vmax=1)
 
-    cbar = fig.colorbar(im.collections[0], ax=ax, orientation='vertical', fraction=0.03, pad=0.04)
-    cbar.set_label('Mean neuron correlation', fontsize=10, rotation=270)
-    cbar.set_ticks([0, 1])
-    cbar.set_ticklabels(['0', '1'])
+    # Add colorbar
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label('Mean neuron correlation', fontsize=10)
+
+    # Axis labels
+    ax.set_xticks(np.arange(num_conditions))
+    ax.set_yticks(np.arange(num_conditions))
+    ax.set_xticklabels(conditions, rotation=90)
+    ax.set_yticklabels(conditions)
     ax.set_title('All Sessions and Goals PSTH Correlation')
 
     plt.tight_layout()

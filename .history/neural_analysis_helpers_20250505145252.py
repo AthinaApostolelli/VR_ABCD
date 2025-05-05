@@ -837,6 +837,7 @@ def get_map_correlation_matrix(all_average_psths, conditions, zscoring=True, sav
     Calculate pairwise PSTH correlation across all sessions and goals.
     '''
     num_sessions = len(all_average_psths)
+    num_goals = len(all_average_psths[0])
 
     # Flatten all data: [(session 0 goal A), (session 0 goal B), ..., (session 1 goal A), ...]
     data = []
@@ -869,15 +870,17 @@ def get_map_correlation_matrix(all_average_psths, conditions, zscoring=True, sav
 
     # === Plot ===
     fig, ax = plt.subplots(figsize=(5,4))
-    im = sns.heatmap(correlation_matrix, annot=True, fmt=".2f", cmap='viridis', vmin=0, vmax=1,
-            cbar_kws={'label': 'Mean neuron correlation'}, cbar=False, square=True, annot_kws={"size": 8}, 
-            xticklabels=[f"{c}" for c in conditions],
-            yticklabels=[f"{c}" for c in conditions])
+    im = ax.imshow(correlation_matrix, cmap='viridis', vmin=0, vmax=1)
 
-    cbar = fig.colorbar(im.collections[0], ax=ax, orientation='vertical', fraction=0.03, pad=0.04)
-    cbar.set_label('Mean neuron correlation', fontsize=10, rotation=270)
-    cbar.set_ticks([0, 1])
-    cbar.set_ticklabels(['0', '1'])
+    # Add colorbar
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label('Mean neuron correlation', fontsize=10)
+
+    # Axis labels
+    ax.set_xticks(np.arange(num_conditions))
+    ax.set_yticks(np.arange(num_conditions))
+    ax.set_xticklabels(conditions, rotation=90)
+    ax.set_yticklabels(conditions)
     ax.set_title('All Sessions and Goals PSTH Correlation')
 
     plt.tight_layout()
