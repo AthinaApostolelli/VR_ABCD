@@ -893,7 +893,7 @@ def get_map_correlation_matrix(all_average_psths, conditions, zscoring=True, sav
     return correlation_matrix
 
 
-def load_vr_session_info(sess_data_path, VR_data=None, options=None):  # TODO: redundant? 
+def load_vr_session_info(sess_data_path, VR_data=None, options=None):
     '''Get landmark, goal, and lap information from VR data.'''
 
     # Load VR data 
@@ -1025,11 +1025,7 @@ def get_landmark_categories(sequence, num_landmarks, session):
     non_goals_idx = np.where(np.isin(session['all_lms'], non_goal_landmark_id))[0]
     test_idx = np.where(np.isin(session['all_lms'], test_landmark_id))[0] if test_landmark_id is None else None
     
-    session['goals_idx'] = goals_idx
-    session['non_goals_idx'] = non_goals_idx
-    session['test_idx'] = test_idx
-
-    return session
+    return goals_idx, non_goals_idx, test_idx
 
 
 def get_landmark_ids(sequence, num_landmarks, session):
@@ -1037,10 +1033,10 @@ def get_landmark_ids(sequence, num_landmarks, session):
 
     if num_landmarks == 10:     # T5 and T6
         if sequence == 'ABAB':
-            goal_landmark_id = np.array([1, 3, 5, 7])
+            goal_landmark_id = [1, 3, 5, 7]
             test_landmark_id = 9
         elif sequence == 'AABB':  
-            goal_landmark_id = np.array([0, 1, 4, 5])
+            goal_landmark_id = [0, 1, 4, 5]
             test_landmark_id = 8
         non_goal_landmark_id = np.setxor1d(np.arange(0,num_landmarks), np.append(goal_landmark_id, test_landmark_id))
  
@@ -1078,16 +1074,16 @@ def get_landmark_category_entries(VR_data, nidaq_data, sequence, num_landmarks, 
     lm_entry_idx, _ = get_lm_entry_exit(session, positions=nidaq_data['position'])
 
     # Find category for each landmark 
-    session = get_landmark_categories(sequence, num_landmarks, session)
+    goals_idx, non_goals_idx, test_idx = get_landmark_categories(sequence, num_landmarks, session)
 
     # Find the rewarded landmarks 
     rewarded_landmarks = get_rewarded_landmarks(VR_data, nidaq_data, session)
 
     # Find landmark entry indices for each landmark category
     rew_lm_entry_idx = [lm_entry_idx[i] for i in rewarded_landmarks]
-    miss_lm_entry_idx = np.array([lm_entry_idx[i] for i in session['goals_idx'] if i not in rewarded_landmarks])
-    nongoal_lm_entry_idx = np.array([lm_entry_idx[i] for i in session['non_goals_idx']])
-    test_lm_entry_idx = np.array([lm_entry_idx[i] for i in session['test_idx']])
+    miss_lm_entry_idx = np.array([lm_entry_idx[i] for i in goals_idx if i not in rewarded_landmarks])
+    nongoal_lm_entry_idx = np.array([lm_entry_idx[i] for i in non_goals_idx])
+    test_lm_entry_idx = np.array([lm_entry_idx[i] for i in test_idx])
 
     assert len(rew_lm_entry_idx) + len(miss_lm_entry_idx) + len(nongoal_lm_entry_idx) + len(test_lm_entry_idx) == len(session['all_lms']), 'Some landmarks have not been considered.'
 

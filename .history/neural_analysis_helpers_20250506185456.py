@@ -1037,10 +1037,10 @@ def get_landmark_ids(sequence, num_landmarks, session):
 
     if num_landmarks == 10:     # T5 and T6
         if sequence == 'ABAB':
-            goal_landmark_id = np.array([1, 3, 5, 7])
+            goal_landmark_id = [1, 3, 5, 7]
             test_landmark_id = 9
         elif sequence == 'AABB':  
-            goal_landmark_id = np.array([0, 1, 4, 5])
+            goal_landmark_id = [0, 1, 4, 5]
             test_landmark_id = 8
         non_goal_landmark_id = np.setxor1d(np.arange(0,num_landmarks), np.append(goal_landmark_id, test_landmark_id))
  
