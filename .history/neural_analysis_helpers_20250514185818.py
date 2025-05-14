@@ -554,7 +554,7 @@ def plot_all_sessions_goal_psth_map(all_average_psths, conditions, zscoring=True
     # Copy and optionally z-score
     data = []
     if isinstance(all_average_psths, list):
-        # assert sorting_goal < len(conditions), 'The sorting goal should be within the range of the data.'
+        assert sorting_goal < len(conditions), 'The sorting goal should be within the range of the data.'
         for session in all_average_psths:
             session_data = {}
             for goal in session.keys():
