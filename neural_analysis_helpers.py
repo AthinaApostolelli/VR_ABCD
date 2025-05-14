@@ -546,15 +546,15 @@ def plot_goal_psth_map(average_psths, zscoring=True, sorting_goal=1, time_around
 def plot_all_sessions_goal_psth_map(all_average_psths, conditions, zscoring=True, ref_session=0, sorting_goal=1, time_around=1, funcimg_frame_rate=45, save_plot=False, savepath='', savedir='', filename=''):
     '''Plot firing maps for all sessions and each goal, sorted by a specific goal.'''
 
+    assert sorting_goal in all_average_psths[ref_session], 'This goal does not exist in the reference session.'
     time_window = time_around * funcimg_frame_rate # frames
     num_timebins = 2*time_window
 
     num_sessions = len(all_average_psths)
 
-    # Copy and optionally z-score
+    # Copy and optionally z-score data
     data = []
     if isinstance(all_average_psths, list):
-        # assert sorting_goal < len(conditions), 'The sorting goal should be within the range of the data.'
         for session in all_average_psths:
             session_data = {}
             for goal in session.keys():
@@ -565,8 +565,6 @@ def plot_all_sessions_goal_psth_map(all_average_psths, conditions, zscoring=True
         goals_per_session = 1
 
     elif isinstance(all_average_psths, dict):
-        assert sorting_goal in all_average_psths[ref_session], 'This goal does not exist in the reference session.'
-
         # Flatten the data
         for session_id, session in all_average_psths.items():  
             session_data = {}
@@ -606,21 +604,30 @@ def plot_all_sessions_goal_psth_map(all_average_psths, conditions, zscoring=True
     # Plot
     for s in range(num_sessions):
         for g, goal in enumerate(goals_per_session[s]):
-            ax[s, g].imshow(data[s][goal][sortidx, :], aspect='auto', vmin=vmin, vmax=vmax)
-            ax[s, g].vlines(time_window-0.5, ymin=-0.5, ymax=data[s][goal].shape[0]-0.5, color='k', linewidth=0.5)
-            ax[s, g].set_xticks([-0.5, num_timebins/2-0.5, num_timebins-0.5])
+            if max_goals == 1:  # one row, multiple columns
+                row = 0
+                col = s  
+            else:
+                row = s
+                col = g  
+            ax[row, col].imshow(data[s][goal][sortidx, :], aspect='auto', vmin=vmin, vmax=vmax)
+            ax[row, col].vlines(time_window-0.5, ymin=-0.5, ymax=data[s][goal].shape[0]-0.5, color='k', linewidth=0.5)
+            ax[row, col].set_xticks([-0.5, num_timebins/2-0.5, num_timebins-0.5])
             if time_around == int(time_around):
                 xticklabels = [int(-time_around), 0, int(time_around)]
             else:
                 xticklabels = [round(-time_around, 1), 0, round(time_around, 1)]
-            ax[s, g].set_xticklabels(xticklabels)
-            ax[s, g].spines[['right', 'top']].set_visible(False)
-            ax[s, g].set_title(goal_label_map.get(goal, str(goal)))
-            if g == 0:
-                ax[s, g].set_ylabel(ylabel[s], labelpad=-5)
-        ax[s,0].set_yticks([-0.5, data[ref_session][goals_per_session[0][0]].shape[0]-0.5])  
-        ax[s,0].set_yticklabels([0, data[ref_session][goals_per_session[0][0]].shape[0]])
-
+            ax[row, col].set_xticklabels(xticklabels)
+            ax[row, col].spines[['right', 'top']].set_visible(False)
+            if max_goals != 1:
+                ax[row, col].set_title(goal_label_map.get(goal, str(goal)))
+            else:
+                ax[row, col].set_title(protocol_nums[s])
+            
+        ax[row,0].set_ylabel(ylabel[s], labelpad=-5)
+        ax[row,0].set_yticks([-0.5, data[ref_session][goals_per_session[0][0]].shape[0]-0.5])  
+        ax[row,0].set_yticklabels([0, data[ref_session][goals_per_session[0][0]].shape[0]])
+            
         # Hide unused axes in that row
         for g_unused in range(len(goals_per_session[s]), max_goals):
             ax[s, g_unused].axis('off')
@@ -1031,12 +1038,12 @@ def load_vr_behaviour_data(sess_data_path):
 def get_landmark_categories(sequence, num_landmarks, session):
     '''Find the landmarks in the entire session that belong to goals, non-goals and test.'''
 
-    goal_landmark_id, non_goal_landmark_id, test_landmark_id = get_landmark_ids(sequence, num_landmarks, session)
+    session = get_landmark_ids(sequence, num_landmarks, session)
 
     # Get the landmarks that belong to each condition  
-    goals_idx = np.where(np.isin(session['all_lms'], goal_landmark_id))[0]
-    non_goals_idx = np.where(np.isin(session['all_lms'], non_goal_landmark_id))[0]
-    test_idx = np.where(np.isin(session['all_lms'], test_landmark_id))[0] if test_landmark_id is None else None
+    goals_idx = np.where(np.isin(session['all_lms'], session['goal_landmark_id']))[0]
+    non_goals_idx = np.where(np.isin(session['all_lms'], session['non_goal_landmark_id']))[0]
+    test_idx = np.where(np.isin(session['all_lms'], session['test_landmark_id']))[0] if session['test_landmark_id'] is not None else None
     
     session['goals_idx'] = goals_idx
     session['non_goals_idx'] = non_goals_idx
@@ -1063,7 +1070,11 @@ def get_landmark_ids(sequence, num_landmarks, session):
         non_goal_landmark_id = np.setdiff1d(lms, goal_landmark_id)[0]
         test_landmark_id = None
 
-    return goal_landmark_id, non_goal_landmark_id, test_landmark_id
+    session['goal_landmark_id'] = goal_landmark_id
+    session['non_goal_landmark_id'] = non_goal_landmark_id
+    session['test_landmark_id'] = test_landmark_id
+
+    return session
 
 
 def get_landmark_category_rew_idx(sequence, num_landmarks, session, VR_data, nidaq_data):
@@ -1085,6 +1096,12 @@ def get_landmark_category_rew_idx(sequence, num_landmarks, session, VR_data, nid
     return rew_time_lag, reward_idx, miss_rew_idx, nongoal_rew_idx, test_rew_idx
 
 
+def get_imag_rew_idx(lm_idx, rew_time_lag):
+    '''Find indices after landmark entry where reward would be expected.'''
+
+    return lm_idx + rew_time_lag
+    
+
 def get_landmark_category_entries(VR_data, nidaq_data, sequence, num_landmarks, session):
     '''Find the indices of landmark entry for different types of landmarks: rewarded, miss, non-goal, test.'''
     
@@ -1100,7 +1117,7 @@ def get_landmark_category_entries(VR_data, nidaq_data, sequence, num_landmarks, 
     rew_lm_entry_idx = [lm_entry_idx[i] for i in rewarded_landmarks]
     miss_lm_entry_idx = np.array([lm_entry_idx[i] for i in session['goals_idx'] if i not in rewarded_landmarks])
     nongoal_lm_entry_idx = np.array([lm_entry_idx[i] for i in session['non_goals_idx']])
-    test_lm_entry_idx = np.array([lm_entry_idx[i] for i in session['test_idx']])
+    test_lm_entry_idx = np.array([lm_entry_idx[i] for i in session['test_idx']]) if session['test_idx'] is not None else np.array([])
 
     assert len(rew_lm_entry_idx) + len(miss_lm_entry_idx) + len(nongoal_lm_entry_idx) + len(test_lm_entry_idx) == len(session['all_lms']), 'Some landmarks have not been considered.'
 
