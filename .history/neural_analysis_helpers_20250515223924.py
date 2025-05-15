@@ -571,7 +571,7 @@ def plot_all_sessions_goal_psth_map(all_average_psths, conditions, zscoring=True
             # else:
             #     raise ValueError('Cannot deal with this data type.')
 
-        goals_per_session = [[1] for s in range(num_sessions)]
+        goals_per_session = [1]
 
     elif isinstance(all_average_psths, dict):
         # Flatten the data

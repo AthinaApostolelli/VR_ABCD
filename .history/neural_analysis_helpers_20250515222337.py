@@ -544,8 +544,7 @@ def plot_goal_psth_map(average_psths, zscoring=True, sorting_goal=1, time_around
 
 
 def plot_all_sessions_goal_psth_map(all_average_psths, conditions, zscoring=True, ref_session=0, sorting_goal=1, time_around=1, funcimg_frame_rate=45, save_plot=False, savepath='', savedir='', filename=''):
-    '''Plot firing maps for all sessions and each goal, sorted by a specific goal. 
-    If there is one goal per session, or the average across goals, it behaves like plot_condition_psth_map.'''
+    '''Plot firing maps for all sessions and each goal, sorted by a specific goal.'''
 
     time_window = time_around * funcimg_frame_rate # frames
     num_timebins = 2*time_window
@@ -563,15 +562,15 @@ def plot_all_sessions_goal_psth_map(all_average_psths, conditions, zscoring=True
                     session_data[goal] = stats.zscore(session[goal], axis=None) if zscoring else session[goal]
                 data.append(session_data)
 
-            else: #if isinstance(session, list):  # transform data to follow the same structure
+            elif isinstance(session, list):  # transform data to follow the same structure
                 session_data = {}
                 session_data[1] = stats.zscore(session, axis=None) if zscoring else session
                 data.append(session_data)
 
-            # else:
-            #     raise ValueError('Cannot deal with this data type.')
+            else:
+                raise ValueError('Cannot deal with this data type.')
 
-        goals_per_session = [[1] for s in range(num_sessions)]
+        goals_per_session = 1
 
     elif isinstance(all_average_psths, dict):
         # Flatten the data
@@ -599,7 +598,6 @@ def plot_all_sessions_goal_psth_map(all_average_psths, conditions, zscoring=True
     # Sort neurons consistently across sessions (using sorting_goal)
     sortidx = np.argsort(np.argmax(data[ref_session][sorting_goal], axis=1))  # reference the first session for sorting
 
-    # === Plotting ===
     # Set up figure
     max_goals = max(len(goals) for goals in goals_per_session)
     goal_label_map = {1: 'A', 2: 'B', 3: 'C', 4: 'D', '1': 'A', '2': 'B', '3': 'C', '4': 'D', 'A': 'A', 'B': 'B', 'C': 'C', 'D': 'D'}
@@ -619,6 +617,7 @@ def plot_all_sessions_goal_psth_map(all_average_psths, conditions, zscoring=True
     ax = np.atleast_2d(ax)
     ax = np.array(ax)
 
+    # Plot
     for s in range(num_sessions):
         for g, goal in enumerate(goals_per_session[s]):
             if max_goals == 1:  # one row, multiple columns
@@ -681,9 +680,9 @@ def plot_condition_psth_map(average_psths, conditions, zscoring=True, time_aroun
     vmin = min([np.nanmin(d) for d in data if d.size > 0])
     vmax = max([np.nanmax(d) for d in data if d.size > 0])
 
-    # === Plotting ===
+    # Sort by different conditions
     for c, condition in enumerate(conditions):
-        sortidx = np.argsort(np.argmax(data[c], axis=1))  # Sort by different conditions
+        sortidx = np.argsort(np.argmax(data[c], axis=1))
         
         im = [[] for _ in range(len(conditions))]
         fig, ax = plt.subplots(1, len(conditions), figsize=(3*len(conditions),3), sharex=True, sharey=True)
@@ -696,15 +695,15 @@ def plot_condition_psth_map(average_psths, conditions, zscoring=True, time_aroun
                 xticklabels = [int(-time_around), 0, int(time_around)]
             else:
                 xticklabels = [round(-time_around, 1), 0, round(time_around, 1)]
-            ax[i].set_xticklabels(xticklabels, fontsize=8)
+            ax[i].set_xticklabels(xticklabels)
             ax[i].spines[['right', 'top']].set_visible(False)
             ax[i].set_xlabel('Time', fontsize=8)
             ax[i].set_title(f'{conditions[i]}', fontsize=10)
             ax[i].vlines(time_window-0.5, ymin=-0.5, ymax=num_neurons-0.5, color='k')
         
         ax[0].set_yticks([-0.5, num_neurons-0.5])
-        ax[0].set_yticklabels([0, num_neurons], fontsize=8)
-        ax[0].set_ylabel('Neuron', fontsize=8, labelpad=-5)
+        ax[0].set_yticklabels([0, num_neurons])
+        ax[0].set_ylabel('Neuron', fontsize=8)
 
         cbar = fig.colorbar(im[-1], ax=ax.ravel().tolist(), shrink=0.6)
         cbar.set_ticks([vmin, vmax])
