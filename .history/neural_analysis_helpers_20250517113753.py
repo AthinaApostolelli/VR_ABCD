@@ -563,10 +563,13 @@ def plot_all_sessions_goal_psth_map(all_average_psths, conditions, zscoring=True
                     session_data[goal] = stats.zscore(session[goal], axis=None) if zscoring else session[goal]
                 data.append(session_data)
 
-            else:  # transform data to follow the same structure
+            else: #if isinstance(session, list):  # transform data to follow the same structure
                 session_data = {}
                 session_data[1] = stats.zscore(session, axis=None) if zscoring else session
                 data.append(session_data)
+
+            # else:
+            #     raise ValueError('Cannot deal with this data type.')
 
         goals_per_session = [[1] for s in range(num_sessions)]
 

@@ -563,10 +563,13 @@ def plot_all_sessions_goal_psth_map(all_average_psths, conditions, zscoring=True
                     session_data[goal] = stats.zscore(session[goal], axis=None) if zscoring else session[goal]
                 data.append(session_data)
 
-            else:  # transform data to follow the same structure
+            else: #if isinstance(session, list):  # transform data to follow the same structure
                 session_data = {}
                 session_data[1] = stats.zscore(session, axis=None) if zscoring else session
                 data.append(session_data)
+
+            # else:
+            #     raise ValueError('Cannot deal with this data type.')
 
         goals_per_session = [[1] for s in range(num_sessions)]
 
@@ -1118,16 +1121,10 @@ def get_landmark_category_rew_idx(sequence, num_landmarks, session, VR_data, nid
     return session
 
 
-def get_imag_rew_idx(nidaq_data, session, lm_idx):
+def get_imag_rew_idx(lm_idx, rew_time_lag):
     '''Find indices after landmark entry where reward would be expected.'''
-    
-    lm_entry_idx, _ = get_lm_entry_exit(session, positions=nidaq_data['position'])
 
-    lm_entry_idx = np.array([lm_entry_idx[i] for i in lm_idx])
-
-    imag_rew_idx = lm_entry_idx + session['rew_time_lag']
-
-    return imag_rew_idx
+    return lm_idx + rew_time_lag
     
 
 def get_landmark_category_entries(VR_data, nidaq_data, sequence, num_landmarks, session):
