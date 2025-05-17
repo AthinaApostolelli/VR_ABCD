@@ -1007,8 +1007,7 @@ def get_lm_entry_exit(session, positions):
     if session['num_laps'] > 1:
         search_start = 0  
         
-        for i, (lm_start, lm_end) in enumerate(session['all_landmarks']):  # TODO: start iteration one lm later 
-
+        for i, (lm_start, lm_end) in enumerate(session['all_landmarks']):
             # idx_start_candidates = np.where(positions[search_start:] >= lm_start)[0]
             # idx_end_candidates = np.where(positions[search_start:] >= lm_end)[0][0] - 1
             # print(idx_end_candidates)

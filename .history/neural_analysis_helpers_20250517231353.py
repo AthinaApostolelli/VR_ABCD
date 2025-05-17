@@ -999,6 +999,7 @@ def load_vr_session_info(sess_data_path, VR_data=None, options=None):  # TODO: r
 
 
 def get_lm_entry_exit(session, positions):
+
     '''Find data idx closest to landmark entry and exit.'''
 
     lm_entry_idx = []
@@ -1006,18 +1007,11 @@ def get_lm_entry_exit(session, positions):
 
     if session['num_laps'] > 1:
         search_start = 0  
-        
-        for i, (lm_start, lm_end) in enumerate(session['all_landmarks']):  # TODO: start iteration one lm later 
 
-            # idx_start_candidates = np.where(positions[search_start:] >= lm_start)[0]
-            # idx_end_candidates = np.where(positions[search_start:] >= lm_end)[0][0] - 1
-            # print(idx_end_candidates)
-            first_lm_end = np.where(positions[search_start:] >= lm_end)[0][0] -1 + search_start
-            print(first_lm_end)
-            idx_candidates = np.where((positions[search_start:] >= lm_start) & (positions[search_start:] <= first_lm_end))[0]
+        for i, (lm_start, lm_end) in enumerate(session['all_landmarks']):
+            idx_candidates = np.where((positions[search_start:] >= lm_start) & (positions[search_start:] <= lm_end))[0]
             if len(idx_candidates) > 0:
                 lm_entry_idx.append(idx_candidates[0] + search_start)
-                # lm_exit_idx.append(idx_end_candidates + search_start)
                 lm_exit_idx.append(idx_candidates[-1] + search_start)  # TODO: confirm
                 search_start += idx_candidates[0] 
             else:
