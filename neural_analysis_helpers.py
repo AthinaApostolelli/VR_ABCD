@@ -1003,27 +1003,33 @@ def get_lm_entry_exit(session, positions):
 
     lm_entry_idx = []
     lm_exit_idx = []
-
+    
     if session['num_laps'] > 1:
         search_start = 0  
         
-        for i, (lm_start, lm_end) in enumerate(session['all_landmarks']):  # TODO: start iteration one lm later 
+        for i, (lm_start, lm_end) in enumerate(session['all_landmarks'][:-1]):  
+            lm_start_idx = np.where(positions[search_start:] >= lm_start)[0][0] + search_start
 
-            # idx_start_candidates = np.where(positions[search_start:] >= lm_start)[0]
-            # idx_end_candidates = np.where(positions[search_start:] >= lm_end)[0][0] - 1
-            # print(idx_end_candidates)
-            first_lm_end = np.where(positions[search_start:] >= lm_end)[0][0] -1 + search_start
-            print(first_lm_end)
-            idx_candidates = np.where((positions[search_start:] >= lm_start) & (positions[search_start:] <= first_lm_end))[0]
-            if len(idx_candidates) > 0:
-                lm_entry_idx.append(idx_candidates[0] + search_start)
-                # lm_exit_idx.append(idx_end_candidates + search_start)
-                lm_exit_idx.append(idx_candidates[-1] + search_start)  # TODO: confirm
-                search_start += idx_candidates[0] 
-            else:
-                print(f"Warning: no match found for landmark {i} with bounds {lm_start}-{lm_end}")
-                lm_entry_idx.append(None)
+            next_lm_start = session['all_landmarks'][i+1,0]
+            next_lm_start_idx = np.where(positions[search_start:] >= next_lm_start)[0][0] + search_start
+            
+            if next_lm_start < lm_start:    # position reset 
+                print('Lap change')
+                lap_change_idx = np.where(np.abs(np.diff(positions[search_start:])) > 200)[0][0]
 
+                next_lm_start_idx = search_start + lap_change_idx + 1
+                
+            start_candidates = np.where(positions[search_start:next_lm_start_idx] >= lm_start)[0]
+            entry_idx = start_candidates[0] + search_start
+            
+            end_candidates = np.where(positions[entry_idx:next_lm_start_idx] >= lm_end)[0]
+            exit_idx = end_candidates[0] + entry_idx
+            
+            search_start = next_lm_start_idx 
+
+            lm_entry_idx.append(entry_idx)
+            lm_exit_idx.append(exit_idx)
+    
     else:
         for lm_start in session['all_landmarks'][:,0]:
             lm_entry_idx.append(np.where(positions >= lm_start)[0][0])
@@ -1165,12 +1171,10 @@ def get_rewarded_landmarks(VR_data, nidaq_data, session):
     lm_entry_idx, lm_exit_idx = get_lm_entry_exit(session, positions=nidaq_data['position'])
 
     # Find rewarded landmarks 
-    reward_positions = nidaq_data['position'][reward_idx]
+    reward_positions = nidaq_data['distance'][reward_idx]  # using flattened position array 
 
-    rewarded_landmarks = [i for i, (start, end) in enumerate(zip(lm_entry_idx, lm_exit_idx)) 
-                        if np.any((reward_positions >= start) & (reward_positions <= end))] 
-    # rewarded_landmarks = [i for i, (start, end) in enumerate(session['all_landmarks']) 
-    #                     if np.any((reward_positions >= start) & (reward_positions <= end))]  
+    rewarded_landmarks = [i for i, (start, end) in enumerate(zip(nidaq_data['distance'][lm_entry_idx], nidaq_data['distance'][lm_exit_idx])) 
+                            if np.any((reward_positions >= start) & (reward_positions <= end))] 
     
     return rewarded_landmarks
 

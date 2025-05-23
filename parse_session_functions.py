@@ -170,7 +170,7 @@ def get_lap_idx(session):
         lap_idx[flip_ix[-1]:] = len(flip_ix)
 
         session['lap_idx'] = lap_idx
-        session['num_laps'] = len(flip_ix)
+        session['num_laps'] = len(flip_ix) + 1
     else:
         # the session didn't have any flips
         session['lap_idx'] = np.ones(len(session['position']))
@@ -342,9 +342,9 @@ def get_lms_visited(options, session):
         last_landmark = np.where(session['landmarks'][:,0] < session['position'][-1])[0][-1] # find the last landmark that was run through
     else:
         last_landmark = len(session['landmarks'])  # TODO: confirm
-        
+    
     num_lms = len(session['landmarks'])*(session['num_laps']-1) + last_landmark 
-
+   
     lm_ids =  np.array(options['flip_tunnel']['landmarks_sequence'])
     all_lms = np.array([])  # landmark ids
     for i in range(session['num_laps']):
