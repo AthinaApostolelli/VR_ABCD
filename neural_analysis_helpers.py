@@ -1,6 +1,6 @@
 import numpy as np 
 import matplotlib.pyplot as plt
-import os
+import os, re
 import scipy.stats as stats
 from scipy.signal import find_peaks
 import pandas as pd
@@ -722,10 +722,11 @@ def plot_condition_psth_map(average_psths, conditions, zscoring=True, time_aroun
         plt.show()
         
 
-def get_map_correlation(psths, average_psths, conditions, zscoring=True, reference=0, color_scheme=None, save_plot=False, savepath='', savedir='', filename=''):
+def get_map_correlation(psths, average_psths, conditions, population=False, zscoring=True, reference=0, color_scheme=None, save_plot=False, savepath='', savedir='', filename=''):
     '''
     Get the firing map correlation among different conditions against a reference. 
     The correlation for the reference is calculated by randomly selecting half the trials.
+    If population is True, the correlation is computed across the entire activity map. Otherwise it is calculated on a neuron-by-neuron basis.
     NOTE: The reference is the index of the data if the data are either a list or a nested dict (will get flattened into a list), but it is a key of the data if the data are a dict. 
     '''
     # Check data format
@@ -793,6 +794,7 @@ def get_map_correlation(psths, average_psths, conditions, zscoring=True, referen
             ref_cond = data_indices.index(reference)
 
     num_neurons = average_psth_data[reference].shape[0]
+    num_timebins = average_psth_data[reference].shape[1]
     
     corrs = [[] for c in data_indices]
 
@@ -808,32 +810,66 @@ def get_map_correlation(psths, average_psths, conditions, zscoring=True, referen
 
     # Calculate correlations
     for c, idx in enumerate(data_indices):
-        for n in range(num_neurons):
-
-            if idx == reference:
-                if np.all(np.isfinite(sorting_data[n])) and np.all(np.isfinite(sorting_data[n])):
-                    r, _ = stats.pearsonr(sorting_data[n], testing_data[n])
-                    corrs[c].append(r)
+        if population is True:
+            for t in range(num_timebins):
+                if idx == reference:
+                    if np.all(np.isfinite(sorting_data[:,t])) and np.all(np.isfinite(sorting_data[:,t])):
+                        r, _ = stats.pearsonr(sorting_data[:,t], testing_data[:,t])
+                        corrs[c].append(r)
+                    else:
+                        corrs[c].append(np.nan)
                 else:
-                    corrs[c].append(np.nan)
-            else:
-                if np.all(np.isfinite(average_psth_data[reference][n])) and np.all(np.isfinite(average_psth_data[idx][n])):
-                    r, _ = stats.pearsonr(average_psth_data[reference][n], average_psth_data[idx][n])
-                    corrs[c].append(r)
+                    if np.all(np.isfinite(average_psth_data[reference][:,t])) and np.all(np.isfinite(average_psth_data[idx][:,t])):
+                        r, _ = stats.pearsonr(average_psth_data[reference][:,t], average_psth_data[idx][:,t])
+                        corrs[c].append(r)
+                    else:
+                        corrs[c].append(np.nan)
+        else:
+            for n in range(num_neurons):
+                if idx == reference:
+                    if np.all(np.isfinite(sorting_data[n])) and np.all(np.isfinite(sorting_data[n])):
+                        r, _ = stats.pearsonr(sorting_data[n], testing_data[n])
+                        corrs[c].append(r)
+                    else:
+                        corrs[c].append(np.nan)
                 else:
-                    corrs[c].append(np.nan)
+                    if np.all(np.isfinite(average_psth_data[reference][n])) and np.all(np.isfinite(average_psth_data[idx][n])):
+                        r, _ = stats.pearsonr(average_psth_data[reference][n], average_psth_data[idx][n])
+                        corrs[c].append(r)
+                    else:
+                        corrs[c].append(np.nan)
     
     # Convert to numpy arrays
     for c in range(len(conditions)):
         corrs[c] = np.array(corrs[c])
 
     # === Plotting ===
+    # Set up labels
     labels = []
     for i, cond in enumerate(conditions):
         if isinstance(average_psths, list):
             labels.append(f"{cond}\nvs\n{conditions[ref_cond]}")
         elif isinstance(average_psths, dict):
-            labels.append(f"{cond} vs {conditions[ref_cond]}")
+            if len(cond) > 10:
+                labels.append(f"{cond}\nvs\n{conditions[ref_cond]}")
+            else:
+                labels.append(f"{cond} vs {conditions[ref_cond]}")
+
+    # Set up colors 
+    if any(re.match(r'^T\d+', cond) for cond in conditions):
+        protocol_nums_found = set()
+        for cond in conditions:
+            match = re.match(r'^T(\d+)', cond)
+            if match:
+                protocol_nums_found.add(int(match.group(1)))
+        if len(protocol_nums_found) > 1:
+            color_scheme = [c for c in color_scheme[:len(protocol_nums_found)] for _ in range(protocol_nums_found)]
+            alphas = [1, 0.5] * len(protocol_nums_found)
+        else:
+            alphas = [1] * len(corrs)
+
+    if color_scheme is None:
+        color_scheme = sns.color_palette("Set2", len(corrs))   # Fallback color scheme if none is given
 
     # Compute mean and SEM for each condition's correlations
     bar_data = []
@@ -846,12 +882,9 @@ def get_map_correlation(psths, average_psths, conditions, zscoring=True, referen
             bar_data.append(np.nanmean(c))
             sem_data.append(stats.sem(c[~np.isnan(c)]) if np.sum(~np.isnan(c)) > 1 else 0)
 
-    # Fallback color scheme if none is given
-    if color_scheme is None:
-        color_scheme = sns.color_palette("Set2", len(corrs))
-    
+    # Plot    
     fig, ax = plt.subplots(figsize=(len(corrs)+1, 4))
-    ax.bar(labels, bar_data, yerr=sem_data, capsize=3, color=color_scheme[:len(corrs)])
+    ax.bar(labels, bar_data, yerr=sem_data, capsize=3, color=color_scheme[:len(corrs)], alphas=alphas)
     ax.set_ylabel('Mean correlation')
     ax.set_title('Per-neuron PSTH correlations')
     ax.spines[['right', 'top']].set_visible(False)
@@ -870,9 +903,10 @@ def get_map_correlation(psths, average_psths, conditions, zscoring=True, referen
     return corrs
 
 
-def get_map_correlation_matrix(all_average_psths, conditions, zscoring=True, save_plot=False, savepath='', savedir='', filename=''):
+def get_map_correlation_matrix(all_average_psths, conditions, population=False, zscoring=True, save_plot=False, savepath='', savedir='', filename=''):
     '''
-    Calculate pairwise PSTH correlation across all sessions and goals.
+    Calculate pairwise PSTH correlation across all sessions and goals. 
+    If population is True, the correlation is computed across the entire activity map. Otherwise it is calculated on a neuron-by-neuron basis.
     '''
     num_sessions = len(all_average_psths)
 
@@ -896,26 +930,40 @@ def get_map_correlation_matrix(all_average_psths, conditions, zscoring=True, sav
     for i in range(num_conditions):
         for j in range(num_conditions):
             correlations = []
-            for n in range(data[i].shape[0]):  # loop over neurons
-                if np.all(np.isfinite(data[i][n])) and np.all(np.isfinite(data[j][n])):
-                    r, _ = stats.pearsonr(data[i][n], data[j][n])
-                    correlations.append(r)
-            if correlations:
-                correlation_matrix[i,j] = np.nanmean(correlations)
+            if population is True:
+                for t in range(data[i].shape[1]):
+                    if np.all(np.isfinite(data[i][:,t])) and np.all(np.isfinite(data[j][:,t])):
+                        r, _ = stats.pearsonr(data[i][:,t], data[j][:,t])
+                        correlations.append(r)
+                if correlations:
+                    correlation_matrix[i,j] = np.nanmean(correlations)
+                else:
+                    correlation_matrix[i,j] = np.nan  # If no valid timebins
             else:
-                correlation_matrix[i,j] = np.nan  # If no valid neurons
+                for n in range(data[i].shape[0]):  # loop over neurons
+                    if np.all(np.isfinite(data[i][n])) and np.all(np.isfinite(data[j][n])):
+                        r, _ = stats.pearsonr(data[i][n], data[j][n])
+                        correlations.append(r)
+                if correlations:
+                    correlation_matrix[i,j] = np.nanmean(correlations)
+                else:
+                    correlation_matrix[i,j] = np.nan  # If no valid neurons
 
     # === Plot ===
     fig, ax = plt.subplots(figsize=(5,4))
-    im = sns.heatmap(correlation_matrix, annot=True, fmt=".2f", cmap='viridis', vmin=0, vmax=1,
-            cbar_kws={'label': 'Mean neuron correlation'}, cbar=False, square=True, annot_kws={"size": 8}, 
+    if population:
+        label = 'Mean population correlation'
+    else:
+        label = 'Mean neuron correlation'
+    im = sns.heatmap(correlation_matrix, annot=True, fmt=".2f", cmap='bwr', vmin=-1, vmax=1,
+            cbar_kws={'label': label}, cbar=False, square=True, annot_kws={"size": 8}, 
             xticklabels=[f"{c}" for c in conditions],
             yticklabels=[f"{c}" for c in conditions])
 
     cbar = fig.colorbar(im.collections[0], ax=ax, orientation='vertical', fraction=0.03, pad=0.04)
-    cbar.set_label('Mean neuron correlation', fontsize=10, rotation=270)
-    cbar.set_ticks([0, 1])
-    cbar.set_ticklabels(['0', '1'])
+    cbar.set_label(label, fontsize=10, rotation=270, labelpad=10)
+    cbar.set_ticks([-1, 0, 1])
+    cbar.set_ticklabels(['-1', '0', '1'])
     ax.set_title('All Sessions and Goals PSTH Correlation')
 
     plt.tight_layout()
