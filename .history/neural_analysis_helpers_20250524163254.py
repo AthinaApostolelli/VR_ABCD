@@ -2,10 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 import scipy.stats as stats
-from scipy.signal import find_peaks
 import pandas as pd
 import yaml
-import math
 import seaborn as sns
 
 
@@ -1008,6 +1006,7 @@ def get_lm_entry_exit(session, positions):
     
     if session['num_laps'] > 1:
         search_start = 0  
+        lap_change_thres = 0.4 * (max(positions) - min(positions)) 
 
         for i, (lm_start, lm_end) in enumerate(session['all_landmarks'][:-1]):  
             lm_start_idx = np.where(positions[search_start:] >= lm_start)[0][0] + search_start
@@ -1016,33 +1015,22 @@ def get_lm_entry_exit(session, positions):
             next_lm_start_idx = np.where(positions[search_start:] >= next_lm_start)[0][0] + search_start
 
             if next_lm_start < lm_start:    # position reset 
-                # print('Lap change')
-                distance = 10 ** (int(math.log10(len(positions))) - 1) 
-                height = math.floor(max(positions)/10)*10
-                lap_change_idx = find_peaks(positions[search_start:], height=height, distance=distance)[0][0] + 1
+                print('Lap change')
+
+                lap_change_idx = np.where(np.abs(np.diff(positions[search_start:])) > lap_change_thres)[0][0]  
 
                 next_lm_start_idx = search_start + lap_change_idx + 1
 
-            start_candidates = np.where(positions[search_start:next_lm_start_idx] >= lm_start)[0]
+            start_candidates = np.where(positions[search_start:next_lm_start_idx+1] >= lm_start)[0]
             entry_idx = start_candidates[0] + search_start
             
-            end_candidates = np.where(positions[entry_idx:next_lm_start_idx] >= lm_end)[0]
+            end_candidates = np.where(positions[entry_idx:next_lm_start_idx+1] >= lm_end)[0]
             exit_idx = end_candidates[0] + entry_idx
 
             search_start = next_lm_start_idx 
 
             lm_entry_idx.append(entry_idx)
             lm_exit_idx.append(exit_idx)
-
-        # last landmark 
-        last_lm_start_idx = np.where(positions[search_start:] >= session['all_landmarks'][-1,0])[0][0] + search_start
-        last_lm_end_idx = np.where(positions[search_start:] >= session['all_landmarks'][-1,1])[0]
-        if len(last_lm_end_idx) != 0:
-            last_lm_end_idx = last_lm_end_idx[0] + search_start
-            lm_entry_idx.append(last_lm_start_idx)  
-            lm_exit_idx.append(last_lm_end_idx)
-        else:
-            return np.array(lm_entry_idx), np.array(lm_exit_idx)  # terminate early 
     
     else:
         for lm_start in session['all_landmarks'][:,0]:

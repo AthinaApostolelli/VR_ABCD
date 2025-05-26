@@ -1016,7 +1016,7 @@ def get_lm_entry_exit(session, positions):
             next_lm_start_idx = np.where(positions[search_start:] >= next_lm_start)[0][0] + search_start
 
             if next_lm_start < lm_start:    # position reset 
-                # print('Lap change')
+                print('Lap change')
                 distance = 10 ** (int(math.log10(len(positions))) - 1) 
                 height = math.floor(max(positions)/10)*10
                 lap_change_idx = find_peaks(positions[search_start:], height=height, distance=distance)[0][0] + 1
@@ -1033,16 +1033,6 @@ def get_lm_entry_exit(session, positions):
 
             lm_entry_idx.append(entry_idx)
             lm_exit_idx.append(exit_idx)
-
-        # last landmark 
-        last_lm_start_idx = np.where(positions[search_start:] >= session['all_landmarks'][-1,0])[0][0] + search_start
-        last_lm_end_idx = np.where(positions[search_start:] >= session['all_landmarks'][-1,1])[0]
-        if len(last_lm_end_idx) != 0:
-            last_lm_end_idx = last_lm_end_idx[0] + search_start
-            lm_entry_idx.append(last_lm_start_idx)  
-            lm_exit_idx.append(last_lm_end_idx)
-        else:
-            return np.array(lm_entry_idx), np.array(lm_exit_idx)  # terminate early 
     
     else:
         for lm_start in session['all_landmarks'][:,0]:

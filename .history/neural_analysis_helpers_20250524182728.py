@@ -1036,7 +1036,7 @@ def get_lm_entry_exit(session, positions):
 
         # last landmark 
         last_lm_start_idx = np.where(positions[search_start:] >= session['all_landmarks'][-1,0])[0][0] + search_start
-        last_lm_end_idx = np.where(positions[search_start:] >= session['all_landmarks'][-1,1])[0]
+        last_lm_end_idx = np.where(positions[search_start:] >= session['all_landmarks'][-1,0])[0]
         if len(last_lm_end_idx) != 0:
             last_lm_end_idx = last_lm_end_idx[0] + search_start
             lm_entry_idx.append(last_lm_start_idx)  
