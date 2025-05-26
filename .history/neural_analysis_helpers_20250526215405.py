@@ -1182,7 +1182,7 @@ def get_landmark_ids(sequence, num_landmarks, session):
 def get_landmark_category_rew_idx(sequence, num_landmarks, session, VR_data, nidaq_data):
     '''Find indices also in non-goal landmarks corresponding to the same time after landmark entry as mean reward time lag.'''
     
-    reward_idx = get_rewards(VR_data, nidaq_data, session, print_output=True)
+    reward_idx = get_rewards(VR_data, nidaq_data, print_output=True)
 
     rew_lm_entry_idx, miss_lm_entry_idx, nongoal_lm_entry_idx, test_lm_entry_idx = get_landmark_category_entries(VR_data, nidaq_data, sequence, num_landmarks, session)
     
@@ -1241,7 +1241,7 @@ def get_landmark_category_entries(VR_data, nidaq_data, sequence, num_landmarks, 
 def get_rewarded_landmarks(VR_data, nidaq_data, session):
     '''Find the indices of rewarded (lick-triggered) landmarks.'''
 
-    reward_idx = get_rewards(VR_data, nidaq_data, session, print_output=False)
+    reward_idx = get_rewards(VR_data, nidaq_data, print_output=False)
     lm_entry_idx, lm_exit_idx = get_lm_entry_exit(session, positions=nidaq_data['position'])
 
     # Find rewarded landmarks 
@@ -1253,7 +1253,7 @@ def get_rewarded_landmarks(VR_data, nidaq_data, session):
     return rewarded_landmarks
 
 
-def get_rewards(VR_data, nidaq_data, session, print_output=False):
+def get_rewards(VR_data, nidaq_data, print_output=False):
     '''Find the indices of lick-triggered rewards in the nidaq logging file.'''
 
     # Find different types of rewards from VR data
@@ -1271,8 +1271,7 @@ def get_rewards(VR_data, nidaq_data, session, print_output=False):
     reward_idx = np.delete(reward_idx, rewards_to_remove)
 
     # Confirm number of rewards makes sense
-    if session['all_landmarks'][-1,1] < nidaq_data['position'][reward_idx[-1]]:  # ensure mouse had left last rewarded landmark 
-        reward_idx = reward_idx[0:-1]  
+    # reward_idx = reward_idx[0:-1]  # TODO: Deal with last reward...
     num_rewards = len(reward_idx)  
 
     if print_output:

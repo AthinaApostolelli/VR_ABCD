@@ -1,6 +1,5 @@
 import numpy as np 
 import matplotlib.pyplot as plt
-from matplotlib.colors import to_rgba
 import os, re
 import scipy.stats as stats
 from scipy.signal import find_peaks
@@ -755,6 +754,7 @@ def get_map_correlation(psths, average_psths, conditions, population=False, zsco
         first_entry = next(iter(average_psths))  
 
         if isinstance(average_psths[first_entry], dict):
+        
             # Flatten all data: [(session 0 goal A), (session 0 goal B), ..., (session 1 goal A), ...]
             average_psth_data = []  
             psth_data = []  
@@ -864,12 +864,11 @@ def get_map_correlation(psths, average_psths, conditions, population=False, zsco
                 protocol_nums_found.add(int(match.group(1)))
         if len(protocol_nums_found) > 1:
             color_scheme = [c for c in color_scheme[:len(protocol_nums_found)] for _ in range(2)]
+
+            # color_scheme = [c for c in color_scheme[:len(protocol_nums_found)] for _ in range(protocol_nums_found)]
             alphas = [1, 0.5] * len(protocol_nums_found)
         else:
             alphas = [1] * len(corrs)
-    else:
-        alphas = [1] * len(corrs)
-    bar_colors = [to_rgba(c, a) for c, a in zip(color_scheme[:len(corrs)], alphas)]
 
     if color_scheme is None:
         color_scheme = sns.color_palette("Set2", len(corrs))   # Fallback color scheme if none is given
@@ -887,12 +886,9 @@ def get_map_correlation(psths, average_psths, conditions, population=False, zsco
 
     # Plot    
     fig, ax = plt.subplots(figsize=(len(corrs)+1, 4))
-    ax.bar(labels, bar_data, yerr=sem_data, capsize=3, color=bar_colors)
+    ax.bar(labels, bar_data, yerr=sem_data, capsize=3, color=color_scheme[:len(corrs)], alphas=alphas)
     ax.set_ylabel('Mean correlation')
-    if population is True:
-        ax.set_title('Population vector correlations')
-    else:
-        ax.set_title('Per-neuron PSTH correlations')
+    ax.set_title('Per-neuron PSTH correlations')
     ax.spines[['right', 'top']].set_visible(False)
     ax.tick_params(axis='x', labelsize=8)
     ax.tick_params(axis='y', labelsize=8)
@@ -903,10 +899,7 @@ def get_map_correlation(psths, average_psths, conditions, population=False, zsco
         output_path = os.path.join(savepath, savedir)
         if not os.path.exists(output_path):
             os.makedirs(output_path)
-        if population:
-            plt.savefig(os.path.join(output_path, filename + '_population.png'))
-        else:
-            plt.savefig(os.path.join(output_path, filename + '.png'))
+        plt.savefig(os.path.join(output_path, filename + '.png'))
     plt.show()
 
     return corrs
@@ -981,10 +974,7 @@ def get_map_correlation_matrix(all_average_psths, conditions, population=False, 
         output_path = os.path.join(savepath, savedir)
         if not os.path.exists(output_path):
             os.makedirs(output_path)
-        if population:
-            plt.savefig(os.path.join(output_path, filename + '_population.png'))
-        else:
-            plt.savefig(os.path.join(output_path, filename + '.png'))
+        plt.savefig(os.path.join(output_path, f'{filename}.png'))
 
     plt.show()
 
@@ -1182,7 +1172,7 @@ def get_landmark_ids(sequence, num_landmarks, session):
 def get_landmark_category_rew_idx(sequence, num_landmarks, session, VR_data, nidaq_data):
     '''Find indices also in non-goal landmarks corresponding to the same time after landmark entry as mean reward time lag.'''
     
-    reward_idx = get_rewards(VR_data, nidaq_data, session, print_output=True)
+    reward_idx = get_rewards(VR_data, nidaq_data, print_output=True)
 
     rew_lm_entry_idx, miss_lm_entry_idx, nongoal_lm_entry_idx, test_lm_entry_idx = get_landmark_category_entries(VR_data, nidaq_data, sequence, num_landmarks, session)
     
@@ -1241,19 +1231,19 @@ def get_landmark_category_entries(VR_data, nidaq_data, sequence, num_landmarks, 
 def get_rewarded_landmarks(VR_data, nidaq_data, session):
     '''Find the indices of rewarded (lick-triggered) landmarks.'''
 
-    reward_idx = get_rewards(VR_data, nidaq_data, session, print_output=False)
+    reward_idx = get_rewards(VR_data, nidaq_data, print_output=False)
     lm_entry_idx, lm_exit_idx = get_lm_entry_exit(session, positions=nidaq_data['position'])
 
     # Find rewarded landmarks 
-    reward_positions = nidaq_data['position'][reward_idx]  # using flattened position array 
+    reward_positions = nidaq_data['distance'][reward_idx]  # using flattened position array 
 
-    rewarded_landmarks = [i for i, (start, end) in enumerate(zip(nidaq_data['position'][lm_entry_idx], nidaq_data['position'][lm_exit_idx])) 
+    rewarded_landmarks = [i for i, (start, end) in enumerate(zip(nidaq_data['distance'][lm_entry_idx], nidaq_data['distance'][lm_exit_idx])) 
                             if np.any((reward_positions >= start) & (reward_positions <= end))] 
     
     return rewarded_landmarks
 
 
-def get_rewards(VR_data, nidaq_data, session, print_output=False):
+def get_rewards(VR_data, nidaq_data, print_output=False):
     '''Find the indices of lick-triggered rewards in the nidaq logging file.'''
 
     # Find different types of rewards from VR data
@@ -1271,8 +1261,7 @@ def get_rewards(VR_data, nidaq_data, session, print_output=False):
     reward_idx = np.delete(reward_idx, rewards_to_remove)
 
     # Confirm number of rewards makes sense
-    if session['all_landmarks'][-1,1] < nidaq_data['position'][reward_idx[-1]]:  # ensure mouse had left last rewarded landmark 
-        reward_idx = reward_idx[0:-1]  
+    # reward_idx = reward_idx[0:-1]  # TODO: Deal with last reward...
     num_rewards = len(reward_idx)  
 
     if print_output:
