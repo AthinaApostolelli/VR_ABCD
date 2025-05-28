@@ -557,21 +557,21 @@ def plot_all_sessions_goal_psth_map(all_average_psths, conditions, zscoring=True
 
     # Copy and optionally z-score data
     data = []
-    goals_per_session = [[] for _ in range(num_sessions)]
     if isinstance(all_average_psths, list):
-        for s, session in enumerate(all_average_psths):
+        for session in all_average_psths:
             if isinstance(session, dict):
                 session_data = {}
                 for goal in session.keys():
                     # session_data[goal] = stats.zscore(session[goal], axis=1) if zscoring else session[goal]
                     session_data[goal] = stats.zscore(session[goal], axis=None) if zscoring else session[goal]
                 data.append(session_data)
+
             else:  # transform data to follow the same structure
                 session_data = {}
                 session_data[1] = stats.zscore(session, axis=None) if zscoring else session
                 data.append(session_data)
-            
-            goals_per_session[s] = list(session_data.keys())
+
+        goals_per_session = [[1] for s in range(num_sessions)]
 
     elif isinstance(all_average_psths, dict):
         # Flatten the data

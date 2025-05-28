@@ -557,22 +557,22 @@ def plot_all_sessions_goal_psth_map(all_average_psths, conditions, zscoring=True
 
     # Copy and optionally z-score data
     data = []
-    goals_per_session = [[] for _ in range(num_sessions)]
+    goals_per_session = []
     if isinstance(all_average_psths, list):
-        for s, session in enumerate(all_average_psths):
+        for session in all_average_psths:
             if isinstance(session, dict):
                 session_data = {}
                 for goal in session.keys():
                     # session_data[goal] = stats.zscore(session[goal], axis=1) if zscoring else session[goal]
                     session_data[goal] = stats.zscore(session[goal], axis=None) if zscoring else session[goal]
                 data.append(session_data)
+                goals_per_session.append(len(data))
             else:  # transform data to follow the same structure
                 session_data = {}
                 session_data[1] = stats.zscore(session, axis=None) if zscoring else session
                 data.append(session_data)
-            
-            goals_per_session[s] = list(session_data.keys())
-
+                goals_per_session.append(len(data))
+        print(goals_per_session)
     elif isinstance(all_average_psths, dict):
         # Flatten the data
         for session_id, session in all_average_psths.items():  
@@ -601,7 +601,9 @@ def plot_all_sessions_goal_psth_map(all_average_psths, conditions, zscoring=True
 
     # === Plotting ===
     # Set up figure
+    print(goals_per_session)
     max_goals = max(len(goals) for goals in goals_per_session)
+    print(max_goals)
     goal_label_map = {1: 'A', 2: 'B', 3: 'C', 4: 'D', '1': 'A', '2': 'B', '3': 'C', '4': 'D', 'A': 'A', 'B': 'B', 'C': 'C', 'D': 'D'}
     protocol_nums = sorted(set([cond.split()[0] for cond in conditions]))
     ylabel = [f'{protocol_nums[s]}\nNeuron' if max_goals > 1 else 'Neuron' for s in range(num_sessions)]

@@ -557,21 +557,21 @@ def plot_all_sessions_goal_psth_map(all_average_psths, conditions, zscoring=True
 
     # Copy and optionally z-score data
     data = []
-    goals_per_session = [[] for _ in range(num_sessions)]
     if isinstance(all_average_psths, list):
-        for s, session in enumerate(all_average_psths):
+        for session in all_average_psths:
             if isinstance(session, dict):
                 session_data = {}
                 for goal in session.keys():
                     # session_data[goal] = stats.zscore(session[goal], axis=1) if zscoring else session[goal]
                     session_data[goal] = stats.zscore(session[goal], axis=None) if zscoring else session[goal]
                 data.append(session_data)
+
             else:  # transform data to follow the same structure
                 session_data = {}
                 session_data[1] = stats.zscore(session, axis=None) if zscoring else session
                 data.append(session_data)
-            
-            goals_per_session[s] = list(session_data.keys())
+
+        goals_per_session = [[1] for s in range(num_sessions)]
 
     elif isinstance(all_average_psths, dict):
         # Flatten the data
@@ -856,20 +856,20 @@ def get_map_correlation(psths, average_psths, conditions, population=False, zsco
                 labels.append(f"{cond} vs {conditions[ref_cond]}")
 
     # Set up colors 
-    # if any(re.match(r'^T\d+', cond) for cond in conditions):
-    #     protocol_nums_found = set()
-    #     for cond in conditions:
-    #         match = re.match(r'^T(\d+)', cond)
-    #         if match:
-    #             protocol_nums_found.add(int(match.group(1)))
-    #     if len(protocol_nums_found) > 1:
-    #         color_scheme = [c for c in color_scheme[:len(protocol_nums_found)] for _ in range(2)]
-    #         alphas = [1, 0.5] * len(protocol_nums_found)
-    #     else:
-    #         alphas = [1] * len(corrs)
-    # else:
-    #     alphas = [1] * len(corrs)
-    # bar_colors = [to_rgba(c, a) for c, a in zip(color_scheme[:len(corrs)], alphas)]
+    if any(re.match(r'^T\d+', cond) for cond in conditions):
+        protocol_nums_found = set()
+        for cond in conditions:
+            match = re.match(r'^T(\d+)', cond)
+            if match:
+                protocol_nums_found.add(int(match.group(1)))
+        if len(protocol_nums_found) > 1:
+            color_scheme = [c for c in color_scheme[:len(protocol_nums_found)] for _ in range(2)]
+            alphas = [1, 0.5] * len(protocol_nums_found)
+        else:
+            alphas = [1] * len(corrs)
+    else:
+        alphas = [1] * len(corrs)
+    bar_colors = [to_rgba(c, a) for c, a in zip(color_scheme[:len(corrs)], alphas)]
 
     if color_scheme is None:
         color_scheme = sns.color_palette("Set2", len(corrs))   # Fallback color scheme if none is given
@@ -887,7 +887,7 @@ def get_map_correlation(psths, average_psths, conditions, population=False, zsco
 
     # Plot    
     fig, ax = plt.subplots(figsize=(len(corrs)+1, 4))
-    ax.bar(labels, bar_data, yerr=sem_data, capsize=3, color=color_scheme)
+    ax.bar(labels, bar_data, yerr=sem_data, capsize=3, color=bar_colors)
     ax.set_ylabel('Mean correlation')
     if population is True:
         ax.set_title('Population vector correlations')
