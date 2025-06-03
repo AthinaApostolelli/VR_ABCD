@@ -1245,10 +1245,10 @@ def get_rewarded_landmarks(VR_data, nidaq_data, session):
     lm_entry_idx, lm_exit_idx = get_lm_entry_exit(session, positions=nidaq_data['position'])
 
     # Find rewarded landmarks 
-    reward_positions = nidaq_data['position'][reward_idx]  # using flattened position array 
+    reward_positions = nidaq_data['distance'][reward_idx]  # using flattened position array 
 
-    rewarded_landmarks = [i for i, (start, end) in enumerate(zip(nidaq_data['distance'][lm_entry_idx], nidaq_data['distance'][lm_exit_idx])) 
-                            if np.any((reward_positions >= start) & (reward_positions <= end))] 
+    rewarded_landmarks = [i for i, (start, end) in enumerate(zip(np.round(nidaq_data['distance'][lm_entry_idx]), np.round(nidaq_data['distance'][lm_exit_idx]))) 
+                            if np.any((np.round(reward_positions) >= start) & (np.round(reward_positions) <= end))] 
     
     return rewarded_landmarks
 
@@ -1271,7 +1271,7 @@ def get_rewards(VR_data, nidaq_data, session, print_output=False):
     reward_idx = np.delete(reward_idx, rewards_to_remove)
 
     # Confirm number of rewards makes sense
-    if session['all_landmarks'][-1,1] < nidaq_data['position'][reward_idx[-1]]:  # ensure mouse had left last rewarded landmark 
+    if session['all_landmarks'][-1,1] > nidaq_data['position'][reward_idx[-1]]:  # ensure mouse has left last rewarded landmark 
         reward_idx = reward_idx[0:-1]  
     num_rewards = len(reward_idx)  
 
