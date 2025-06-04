@@ -160,8 +160,10 @@ def create_session_struct_npz(data,options):
 
 def get_lap_idx(session):
     # get lap idx
-    # flip_ix = np.where(np.diff(session['position']) < -138)[0]
     flip_ix = signal.find_peaks(session['position'], height=session['tunnel_length']-1,distance=100)[0]
+    if (session['position'][0] - session['landmarks'][-1,1]) < (session['position'][0] - session['landmarks'][0,0]):
+        flip_ix = flip_ix[1:]  # Remove the first peak index - the mouse accidentally moved backwards first
+        
     if len(flip_ix) > 0:
         # a lap is between two flips
         lap_idx = np.zeros(len(session['position']))
