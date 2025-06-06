@@ -3,9 +3,20 @@ import re, os, sys
 import numpy as np
 import matplotlib.pyplot as plt
 import roicat
+import scipy.sparse
+from typing import Union, Optional
+import collections
+import json
+from roicat import helpers
+# import richfile as rf
+import torch 
+import pandas as pd 
+import pickle
+
 
 def roicat_align_rois(roicat_dir, roicat_data_name, sessions_to_align, basepath, animal, alignment_method='F', data=None, plot_alignment=False, savepath=''):
-    '''For more details look at the ROICaT documentation https://roicat.readthedocs.io/en/latest/index.html.'''
+    '''Align the neural data according to the ROI they belong to, 
+    For more details look at the ROICaT documentation https://roicat.readthedocs.io/en/latest/index.html.'''
 
     # Data paths ROICaT
     paths_save = {
@@ -52,6 +63,8 @@ def roicat_align_rois(roicat_dir, roicat_data_name, sessions_to_align, basepath,
         iscell[s] = np.load(datapath)[:,0]
 
     # Apply the mask to the aligned data
+    print(len(roi_labels))
+    print(len(iscell))
     labels_iscell = roicat.util.mask_UCIDs_with_iscell(
         ucids=roi_labels,
         iscell=iscell
@@ -90,9 +103,60 @@ def roicat_align_rois(roicat_dir, roicat_data_name, sessions_to_align, basepath,
     else:
         if not os.path.exists(savepath):
             os.makedirs(savepath)
-    np.save(os.path.join(savepath, f'roicat_aligned_ROIs_{'_'.join(f't{n}' for n in protocol_nums)}.npy'), idx_original_aligned)
+    filename = f"roicat_aligned_ROIs_{'_'.join(['t' + str(n) for n in protocol_nums])}.npy"
+    np.save(os.path.join(savepath, filename), idx_original_aligned)
 
     return data_aligned_masked, idx_original_aligned
+
+
+def roicat_visualize_tracked_rois(roicat_dir, roicat_data_name, sessions_to_align, tracked_neuron_ids=None):
+    '''Visualize the alignment of tracked ROIs. For more details look at the ROICaT documentation https://roicat.readthedocs.io/en/latest/index.html.'''
+
+    # Handle single or multiple sessions
+    if isinstance(sessions_to_align, str):
+        sessions_to_align = [sessions_to_align]
+
+    protocol_nums = [int(re.search(r'protocol-t(\d+)', s).group(1)) for s in sessions_to_align]
+
+    # Data paths ROICaT
+    paths_save = {
+        'results_clusters': str(Path(roicat_dir) / f'{roicat_data_name}.tracking.results_clusters.json'),
+        'params_used':      str(Path(roicat_dir) / f'{roicat_data_name}.tracking.params_used.json'),
+        'results_all':      str(Path(roicat_dir) / f'{roicat_data_name}.tracking.results_all.richfile'),
+        'run_data':         str(Path(roicat_dir) / f'{roicat_data_name}.tracking.run_data.richfile'),
+    }
+
+    # Find session index 
+    ROICaT_results = roicat.util.RichFile_ROICaT(path=paths_save['results_all'])
+
+    labels_bySession = ROICaT_results['clusters']['labels_bySession'].load()
+    roi_labels = [labels_bySession[i] for i in protocol_nums]
+
+    ROIs = ROICaT_results['ROIs'].load()
+    rois = [ROIs['ROIs_aligned'][i] for i in protocol_nums]
+
+    # Only visualize the tracked neurons 
+    if tracked_neuron_ids is not None:
+        roi_labels = [
+            np.array(session_labels)[valid_ids]
+            for session_labels, valid_ids in zip(roi_labels, tracked_neuron_ids)]
+
+        rois = [session_labels[valid_ids] for session_labels, valid_ids in zip(rois, tracked_neuron_ids)]
+
+    # Find clusters
+    FOV_clusters = roicat.visualization.compute_colored_FOV(
+        spatialFootprints=[r.power(1.0) for r in rois],  ## Spatial footprint sparse arrays
+        FOV_height=ROIs['frame_height'],
+        FOV_width=ROIs['frame_width'],
+        labels=roi_labels
+    )
+
+    # Visualize ROIs
+    roicat.visualization.display_toggle_image_stack(
+        FOV_clusters, 
+        image_size=1.5,
+    )
+
 
 
 # def roicat_track_rois(): 
@@ -100,15 +164,24 @@ def roicat_align_rois(roicat_dir, roicat_data_name, sessions_to_align, basepath,
 
 
 if __name__ == '__main__':
+    function_name = sys.argv[1]  
+    args = sys.argv[2:]
 
-    data_aligned_masked, idx_original_aligned = roicat_align_rois(roicat_dir=r'/Users/athinaapostolelli/Documents/SWC/VR_ABCD/ROICaT',
-                      roicat_data_name='TAA0000066',
-                      sessions_to_align=['ses-011_date-20250315_protocol-t5', 'ses-012_date-20250318_protocol-t6'],
-                      basepath=Path('/Volumes/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2'),
-                      animal='TAA0000066',
-                      alignment_method='DF_F0',
-                      data=None,
-                      plot_alignment=False,
-                      savepath='')
+    if function_name == 'roicat_align_rois':
+        data_aligned_masked, idx_original_aligned = roicat_align_rois(*args)
+        
+    elif function_name == 'roicat_visualize_tracked_rois':
+        args = json.loads(sys.argv[2])
+        roicat_visualize_tracked_rois(
+            args["roicat_dir"],
+            args["roicat_data_name"],
+            args["sessions_to_align"],
+            args.get("tracked_neuron_ids")  # Optional
+        )
+
+    else:
+        print("Function not found!")
+
+    
     
 

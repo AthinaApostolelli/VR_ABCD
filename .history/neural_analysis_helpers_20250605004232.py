@@ -1,9 +1,12 @@
 import numpy as np 
 import matplotlib.pyplot as plt
-import os
+from matplotlib.colors import to_rgba
+import os, re
 import scipy.stats as stats
+from scipy.signal import find_peaks
 import pandas as pd
 import yaml
+import math
 import seaborn as sns
 
 
@@ -544,30 +547,50 @@ def plot_goal_psth_map(average_psths, zscoring=True, sorting_goal=1, time_around
 
 
 def plot_all_sessions_goal_psth_map(all_average_psths, conditions, zscoring=True, ref_session=0, sorting_goal=1, time_around=1, funcimg_frame_rate=45, save_plot=False, savepath='', savedir='', filename=''):
-    '''Plot firing maps for all sessions and each goal, sorted by a specific goal.'''
+    '''Plot firing maps for all sessions and each goal, sorted by a specific goal. 
+    If there is one goal per session, or the average across goals, it behaves like plot_condition_psth_map.'''
 
-    assert sorting_goal in all_average_psths[ref_session], 'This goal does not exist in the reference session.'
     time_window = time_around * funcimg_frame_rate # frames
     num_timebins = 2*time_window
 
-    # Copy and optionally z-score
+    num_sessions = len(all_average_psths)
+
+    # Copy and optionally z-score data
     data = []
+    goals_per_session = [[] for _ in range(num_sessions)]
     if isinstance(all_average_psths, list):
-        for session in all_average_psths:
-            session_data = {}
-            for goal in session.keys():
-                # session_data[goal] = stats.zscore(session[goal], axis=1) if zscoring else session[goal]
-                session_data[goal] = stats.zscore(session[goal], axis=None) if zscoring else session[goal]
-            data.append(session_data)
+        for s, session in enumerate(all_average_psths):
+            if isinstance(session, dict):
+                session_data = {}
+                for goal in session.keys():
+                    # session_data[goal] = stats.zscore(session[goal], axis=1) if zscoring else session[goal]
+                    session_data[goal] = stats.zscore(session[goal], axis=None) if zscoring else session[goal]
+                data.append(session_data)
+            else:  # transform data to follow the same structure
+                session_data = {}
+                session_data[1] = stats.zscore(session, axis=None) if zscoring else session
+                data.append(session_data)
+            
+            goals_per_session[s] = list(session_data.keys())
 
     elif isinstance(all_average_psths, dict):
         # Flatten the data
         for session_id, session in all_average_psths.items():  
-            session_data = {}
-            for goal in session.keys():
-                # session_data[goal] = stats.zscore(session[goal], axis=1) if zscoring else session[goal]
-                session_data[goal] = stats.zscore(session[goal], axis=None) if zscoring else session[goal]
-            data.append(session_data)
+            if isinstance(session, dict):
+                assert sorting_goal in all_average_psths[ref_session], 'This goal does not exist in the reference session.'
+
+                session_data = {}
+                for goal in session.keys():
+                    # session_data[goal] = stats.zscore(session[goal], axis=1) if zscoring else session[goal]
+                    session_data[goal] = stats.zscore(session[goal], axis=None) if zscoring else session[goal]
+                data.append(session_data)
+
+            else:  # transform data to follow the same structure
+                session_data = {}
+                session_data[1] = stats.zscore(session, axis=None) if zscoring else session
+                data.append(session_data)
+
+        goals_per_session = [sorted(data[s].keys()) for s in range(num_sessions)]
 
     # Compute global vmin/vmax
     vmin = min([np.nanmin(session[goal]) for session in data for goal in session.keys()])
@@ -576,38 +599,54 @@ def plot_all_sessions_goal_psth_map(all_average_psths, conditions, zscoring=True
     # Sort neurons consistently across sessions (using sorting_goal)
     sortidx = np.argsort(np.argmax(data[ref_session][sorting_goal], axis=1))  # reference the first session for sorting
 
+    # === Plotting ===
     # Set up figure
-    # Determine the number of sessions and max number of goals
-    num_sessions = len(all_average_psths)
-    goals_per_session = [sorted(data[s].keys()) for s in range(num_sessions)]
     max_goals = max(len(goals) for goals in goals_per_session)
     goal_label_map = {1: 'A', 2: 'B', 3: 'C', 4: 'D', '1': 'A', '2': 'B', '3': 'C', '4': 'D', 'A': 'A', 'B': 'B', 'C': 'C', 'D': 'D'}
     protocol_nums = sorted(set([cond.split()[0] for cond in conditions]))
+    ylabel = [f'{protocol_nums[s]}\nNeuron' if max_goals > 1 else 'Neuron' for s in range(num_sessions)]
+    # titles = [protocol_nums[s] for s in range(num_sessions)]
+    titles = [conditions[s] for s in range(num_sessions)]
 
-    fig, ax = plt.subplots(num_sessions, max_goals, figsize=(3*max_goals, 3*num_sessions), sharex=True, sharey=True)
+    if max_goals == 1: 
+        nrows = 1
+        ncols = num_sessions
+    else:
+        nrows = num_sessions
+        ncols = max_goals
+        
+    fig, ax = plt.subplots(nrows, ncols, figsize=(3*ncols, 3*nrows), sharex=True, sharey=True)
 
-    if num_sessions == 1 or max_goals == 1:
-        ax = np.atleast_2d(ax)
+    # if num_sessions == 1 or max_goals == 1:
+    ax = np.atleast_2d(ax)
     ax = np.array(ax)
 
-    # Plot
     for s in range(num_sessions):
         for g, goal in enumerate(goals_per_session[s]):
-            ax[s, g].imshow(data[s][goal][sortidx, :], aspect='auto', vmin=vmin, vmax=vmax)
-            ax[s, g].vlines(time_window-0.5, ymin=-0.5, ymax=data[s][goal].shape[0]-0.5, color='k', linewidth=0.5)
-            ax[s, g].set_xticks([-0.5, num_timebins/2-0.5, num_timebins-0.5])
+            if max_goals == 1:  # one row, multiple columns
+                row = 0
+                col = s  
+            else:
+                row = s
+                col = g  
+            ax[row, col].imshow(data[s][goal][sortidx, :], aspect='auto', vmin=vmin, vmax=vmax)
+            ax[row, col].vlines(time_window-0.5, ymin=-0.5, ymax=data[s][goal].shape[0]-0.5, color='k', linewidth=0.5)
+            ax[row, col].set_xticks([-0.5, num_timebins/2-0.5, num_timebins-0.5])
             if time_around == int(time_around):
                 xticklabels = [int(-time_around), 0, int(time_around)]
             else:
                 xticklabels = [round(-time_around, 1), 0, round(time_around, 1)]
-            ax[s, g].set_xticklabels(xticklabels)
-            ax[s, g].spines[['right', 'top']].set_visible(False)
-            ax[s, g].set_title(goal_label_map.get(goal, str(goal)))
-            if g == 0:
-                ax[s, g].set_ylabel(f'{protocol_nums[s]}\nNeuron', labelpad=-5)
-        ax[s,0].set_yticks([-0.5, data[ref_session][goals_per_session[0][0]].shape[0]-0.5])  
-        ax[s,0].set_yticklabels([0, data[ref_session][goals_per_session[0][0]].shape[0]])
-
+            ax[row, col].set_xticklabels(xticklabels)
+            ax[row, col].spines[['right', 'top']].set_visible(False)
+            if max_goals != 1:
+                ax[row, col].set_title(goal_label_map.get(goal, str(goal)))
+            else:
+                ax[row, col].set_title(titles[s])
+            
+        ax[row,0].set_ylabel(ylabel[s], labelpad=-5)
+        ax[row,0].set_yticks([-0.5, data[ref_session][goals_per_session[0][0]].shape[0]-0.5])  
+        ax[row,0].set_yticklabels([0, data[ref_session][goals_per_session[0][0]].shape[0]])
+            
         # Hide unused axes in that row
         for g_unused in range(len(goals_per_session[s]), max_goals):
             ax[s, g_unused].axis('off')
@@ -616,37 +655,6 @@ def plot_all_sessions_goal_psth_map(all_average_psths, conditions, zscoring=True
     cbar.set_ticks([vmin, vmax])
     cbar.ax.set_yticklabels([str(int(round(vmin))), str(int(round(vmax)))], fontsize=8)
     cbar.set_label(r'z-scored $\Delta$F/F0' if zscoring else r'$\Delta$F/F0', rotation=270, labelpad=0, fontsize=8)
-
-    # fig, ax = plt.subplots(num_sessions, num_goals, figsize=(3*num_goals, 3*num_sessions), sharex=True, sharey=True)
-    # if num_sessions == 1 or num_goals == 1:
-    #     ax = np.atleast_2d(ax)
-    # ax = np.array(ax)
-
-    # for s in range(num_sessions):
-    #     for g, goal in enumerate(sorted(data[s].keys())):
-    #         ax[s,g].imshow(data[s][goal][sortidx, :], aspect='auto', vmin=vmin, vmax=vmax)
-    #         ax[s,g].vlines(time_window-0.5, ymin=-0.5, ymax=data[s][goal].shape[0]-0.5, color='k', linewidth=0.5)
-    #         ax[s,g].set_xticks([-0.5, num_timebins/2-0.5, num_timebins-0.5])
-    #         ax[s,g].set_xticklabels([int(-time_around), 0, int(time_around)])
-    #         ax[s,g].spines[['right', 'top']].set_visible(False)
-    #         if s == 0:
-    #             ax[s,g].set_title(goals[g])
-    #         if g == 0:
-    #             ax[s,g].set_ylabel(f'Session {s+1}\nNeuron')
-
-    # ax[0,0].set_yticks([-0.5, data[s][goal].shape[0]-0.5])
-    # ax[0,0].set_yticklabels([0, data[s][goal].shape[0]])
-    # ax[0,0].set_ylabel('Neuron')
-
-    # ax[1,0].set_yticks([-0.5, data[s][goal].shape[0]-0.5])
-    # ax[1,0].set_yticklabels([0, data[s][goal].shape[0]])
-    # ax[1,0].set_ylabel('Neuron')
-
-    # # Add colorbar
-    # cbar = fig.colorbar(ax[0,0].images[0], ax=ax.ravel().tolist(), shrink=0.6)
-    # cbar.set_ticks([vmin, vmax])
-    # cbar.ax.set_yticklabels([str(int(round(vmin))), str(int(round(vmax)))], fontsize=8)
-    # cbar.set_label(r'z-scored $\Delta$F/F0' if zscoring else r'$\Delta$F/F0', rotation=270, labelpad=10, fontsize=8)
 
     if save_plot:
         output_path = os.path.join(savepath, savedir)
@@ -675,12 +683,12 @@ def plot_condition_psth_map(average_psths, conditions, zscoring=True, time_aroun
     vmin = min([np.nanmin(d) for d in data if d.size > 0])
     vmax = max([np.nanmax(d) for d in data if d.size > 0])
 
-    # Sort by different conditions
+    # === Plotting ===
     for c, condition in enumerate(conditions):
-        sortidx = np.argsort(np.argmax(data[c], axis=1))
+        sortidx = np.argsort(np.argmax(data[c], axis=1))  # Sort by different conditions
         
         im = [[] for _ in range(len(conditions))]
-        fig, ax = plt.subplots(1, len(conditions), figsize=(4*len(conditions),4), sharex=True, sharey=True)
+        fig, ax = plt.subplots(1, len(conditions), figsize=(3*len(conditions),3), sharex=True, sharey=True)
         ax = ax.ravel()
         
         for i in range(len(conditions)):
@@ -690,22 +698,22 @@ def plot_condition_psth_map(average_psths, conditions, zscoring=True, time_aroun
                 xticklabels = [int(-time_around), 0, int(time_around)]
             else:
                 xticklabels = [round(-time_around, 1), 0, round(time_around, 1)]
-            ax[i].set_xticklabels(xticklabels)
+            ax[i].set_xticklabels(xticklabels, fontsize=8)
             ax[i].spines[['right', 'top']].set_visible(False)
-            ax[i].set_xlabel('Time')
+            ax[i].set_xlabel('Time', fontsize=8)
             ax[i].set_title(f'{conditions[i]}', fontsize=10)
             ax[i].vlines(time_window-0.5, ymin=-0.5, ymax=num_neurons-0.5, color='k')
         
         ax[0].set_yticks([-0.5, num_neurons-0.5])
-        ax[0].set_yticklabels([0, num_neurons])
-        ax[0].set_ylabel('Neuron')
+        ax[0].set_yticklabels([0, num_neurons], fontsize=8)
+        ax[0].set_ylabel('Neuron', fontsize=8, labelpad=-5)
 
         cbar = fig.colorbar(im[-1], ax=ax.ravel().tolist(), shrink=0.6)
         cbar.set_ticks([vmin, vmax])
         cbar.ax.set_yticklabels([str(int(round(vmin))), str(int(round(vmax)))], fontsize=8)
         cbar.set_label(r'z-scored $\Delta$F/F0' if zscoring else r'$\Delta$F/F0', rotation=270, labelpad=10, fontsize=8)
 
-        plt.suptitle(f'Sorting by {condition} trials')
+        plt.suptitle(f'Sorting by {condition} trials', fontsize=10)
 
         if save_plot:
             output_path = os.path.join(savepath, savedir)
@@ -715,10 +723,11 @@ def plot_condition_psth_map(average_psths, conditions, zscoring=True, time_aroun
         plt.show()
         
 
-def get_map_correlation(psths, average_psths, conditions, zscoring=True, reference=0, color_scheme=None, save_plot=False, savepath='', savedir='', filename=''):
+def get_map_correlation(psths, average_psths, conditions, population=False, zscoring=True, reference=0, color_scheme=None, save_plot=False, savepath='', savedir='', filename=''):
     '''
     Get the firing map correlation among different conditions against a reference. 
     The correlation for the reference is calculated by randomly selecting half the trials.
+    If population is True, the correlation is computed across the entire activity map. Otherwise it is calculated on a neuron-by-neuron basis.
     NOTE: The reference is the index of the data if the data are either a list or a nested dict (will get flattened into a list), but it is a key of the data if the data are a dict. 
     '''
     # Check data format
@@ -746,7 +755,6 @@ def get_map_correlation(psths, average_psths, conditions, zscoring=True, referen
         first_entry = next(iter(average_psths))  
 
         if isinstance(average_psths[first_entry], dict):
-        
             # Flatten all data: [(session 0 goal A), (session 0 goal B), ..., (session 1 goal A), ...]
             average_psth_data = []  
             psth_data = []  
@@ -786,6 +794,7 @@ def get_map_correlation(psths, average_psths, conditions, zscoring=True, referen
             ref_cond = data_indices.index(reference)
 
     num_neurons = average_psth_data[reference].shape[0]
+    num_timebins = average_psth_data[reference].shape[1]
     
     corrs = [[] for c in data_indices]
 
@@ -801,32 +810,55 @@ def get_map_correlation(psths, average_psths, conditions, zscoring=True, referen
 
     # Calculate correlations
     for c, idx in enumerate(data_indices):
-        for n in range(num_neurons):
-
-            if idx == reference:
-                if np.all(np.isfinite(sorting_data[n])) and np.all(np.isfinite(sorting_data[n])):
-                    r, _ = stats.pearsonr(sorting_data[n], testing_data[n])
-                    corrs[c].append(r)
+        print(c)
+        if population is True:
+            for t in range(num_timebins):
+                if idx == reference:
+                    if np.all(np.isfinite(sorting_data[:,t])) and np.all(np.isfinite(testing_data[:,t])):
+                        r, _ = stats.pearsonr(sorting_data[:,t], testing_data[:,t])
+                        corrs[c].append(r)
+                    else:
+                        corrs[c].append(np.nan)
                 else:
-                    corrs[c].append(np.nan)
-            else:
-                if np.all(np.isfinite(average_psth_data[reference][n])) and np.all(np.isfinite(average_psth_data[idx][n])):
-                    r, _ = stats.pearsonr(average_psth_data[reference][n], average_psth_data[idx][n])
-                    corrs[c].append(r)
+                    if np.all(np.isfinite(average_psth_data[reference][:,t])) and np.all(np.isfinite(average_psth_data[idx][:,t])):
+                        r, _ = stats.pearsonr(average_psth_data[reference][:,t], average_psth_data[idx][:,t])
+                        corrs[c].append(r)
+                    else:
+                        corrs[c].append(np.nan)
+        else:
+            for n in range(num_neurons):
+                if idx == reference:
+                    if np.all(np.isfinite(sorting_data[n])) and np.all(np.isfinite(testing_data[n])):
+                        r, _ = stats.pearsonr(sorting_data[n], testing_data[n])
+                        corrs[c].append(r)
+                    else:
+                        corrs[c].append(np.nan)
                 else:
-                    corrs[c].append(np.nan)
+                    if np.all(np.isfinite(average_psth_data[reference][n])) and np.all(np.isfinite(average_psth_data[idx][n])):
+                        r, _ = stats.pearsonr(average_psth_data[reference][n], average_psth_data[idx][n])
+                        corrs[c].append(r)
+                    else:
+                        corrs[c].append(np.nan)
     
     # Convert to numpy arrays
     for c in range(len(conditions)):
         corrs[c] = np.array(corrs[c])
 
     # === Plotting ===
+    # Set up labels
     labels = []
     for i, cond in enumerate(conditions):
+        print(cond)
         if isinstance(average_psths, list):
             labels.append(f"{cond}\nvs\n{conditions[ref_cond]}")
         elif isinstance(average_psths, dict):
-            labels.append(f"{cond} vs {conditions[ref_cond]}")
+            if len(cond) > 10:
+                labels.append(f"{cond}\nvs\n{conditions[ref_cond]}")
+            else:
+                labels.append(f"{cond} vs {conditions[ref_cond]}")
+
+    if color_scheme is None:
+        color_scheme = sns.color_palette("Set2", len(corrs))   # Fallback color scheme if none is given
 
     # Compute mean and SEM for each condition's correlations
     bar_data = []
@@ -839,14 +871,14 @@ def get_map_correlation(psths, average_psths, conditions, zscoring=True, referen
             bar_data.append(np.nanmean(c))
             sem_data.append(stats.sem(c[~np.isnan(c)]) if np.sum(~np.isnan(c)) > 1 else 0)
 
-    # Fallback color scheme if none is given
-    if color_scheme is None:
-        color_scheme = sns.color_palette("Set2", len(corrs))
-    
+    # Plot    
     fig, ax = plt.subplots(figsize=(len(corrs)+1, 4))
-    ax.bar(labels, bar_data, yerr=sem_data, capsize=3, color=color_scheme[:len(corrs)])
+    ax.bar(labels, bar_data, yerr=sem_data, capsize=3, color=color_scheme)
     ax.set_ylabel('Mean correlation')
-    ax.set_title('Per-neuron PSTH correlations')
+    if population is True:
+        ax.set_title('Population vector correlations')
+    else:
+        ax.set_title('Per-neuron PSTH correlations')
     ax.spines[['right', 'top']].set_visible(False)
     ax.tick_params(axis='x', labelsize=8)
     ax.tick_params(axis='y', labelsize=8)
@@ -857,18 +889,21 @@ def get_map_correlation(psths, average_psths, conditions, zscoring=True, referen
         output_path = os.path.join(savepath, savedir)
         if not os.path.exists(output_path):
             os.makedirs(output_path)
-        plt.savefig(os.path.join(output_path, filename + '.png'))
+        if population:
+            plt.savefig(os.path.join(output_path, filename + '_population.png'))
+        else:
+            plt.savefig(os.path.join(output_path, filename + '.png'))
     plt.show()
 
     return corrs
 
 
-def get_map_correlation_matrix(all_average_psths, conditions, zscoring=True, save_plot=False, savepath='', savedir='', filename=''):
+def get_map_correlation_matrix(all_average_psths, conditions, population=False, zscoring=True, save_plot=False, savepath='', savedir='', filename=''):
     '''
-    Calculate pairwise PSTH correlation across all sessions and goals.
+    Calculate pairwise PSTH correlation across all sessions and goals. 
+    If population is True, the correlation is computed across the entire activity map. Otherwise it is calculated on a neuron-by-neuron basis.
     '''
     num_sessions = len(all_average_psths)
-    num_goals = len(all_average_psths[0])
 
     # Flatten all data: [(session 0 goal A), (session 0 goal B), ..., (session 1 goal A), ...]
     data = []
@@ -890,28 +925,40 @@ def get_map_correlation_matrix(all_average_psths, conditions, zscoring=True, sav
     for i in range(num_conditions):
         for j in range(num_conditions):
             correlations = []
-            for n in range(data[i].shape[0]):  # loop over neurons
-                if np.all(np.isfinite(data[i][n])) and np.all(np.isfinite(data[j][n])):
-                    r, _ = stats.pearsonr(data[i][n], data[j][n])
-                    correlations.append(r)
-            if correlations:
-                correlation_matrix[i,j] = np.nanmean(correlations)
+            if population is True:
+                for t in range(data[i].shape[1]):
+                    if np.all(np.isfinite(data[i][:,t])) and np.all(np.isfinite(data[j][:,t])):
+                        r, _ = stats.pearsonr(data[i][:,t], data[j][:,t])
+                        correlations.append(r)
+                if correlations:
+                    correlation_matrix[i,j] = np.nanmean(correlations)
+                else:
+                    correlation_matrix[i,j] = np.nan  # If no valid timebins
             else:
-                correlation_matrix[i,j] = np.nan  # If no valid neurons
+                for n in range(data[i].shape[0]):  # loop over neurons
+                    if np.all(np.isfinite(data[i][n])) and np.all(np.isfinite(data[j][n])):
+                        r, _ = stats.pearsonr(data[i][n], data[j][n])
+                        correlations.append(r)
+                if correlations:
+                    correlation_matrix[i,j] = np.nanmean(correlations)
+                else:
+                    correlation_matrix[i,j] = np.nan  # If no valid neurons
 
     # === Plot ===
     fig, ax = plt.subplots(figsize=(5,4))
-    im = ax.imshow(correlation_matrix, cmap='viridis', vmin=0, vmax=1)
+    if population:
+        label = 'Mean population correlation'
+    else:
+        label = 'Mean neuron correlation'
+    im = sns.heatmap(correlation_matrix, annot=True, fmt=".2f", cmap='bwr', vmin=-1, vmax=1,
+            cbar_kws={'label': label}, cbar=False, square=True, annot_kws={"size": 8}, 
+            xticklabels=[f"{c}" for c in conditions],
+            yticklabels=[f"{c}" for c in conditions])
 
-    # Add colorbar
-    cbar = plt.colorbar(im, ax=ax)
-    cbar.set_label('Mean neuron correlation', fontsize=10)
-
-    # Axis labels
-    ax.set_xticks(np.arange(num_conditions))
-    ax.set_yticks(np.arange(num_conditions))
-    ax.set_xticklabels(conditions, rotation=90)
-    ax.set_yticklabels(conditions)
+    cbar = fig.colorbar(im.collections[0], ax=ax, orientation='vertical', fraction=0.03, pad=0.04)
+    cbar.set_label(label, fontsize=10, rotation=270, labelpad=10)
+    cbar.set_ticks([-1, 0, 1])
+    cbar.set_ticklabels(['-1', '0', '1'])
     ax.set_title('All Sessions and Goals PSTH Correlation')
 
     plt.tight_layout()
@@ -920,14 +967,17 @@ def get_map_correlation_matrix(all_average_psths, conditions, zscoring=True, sav
         output_path = os.path.join(savepath, savedir)
         if not os.path.exists(output_path):
             os.makedirs(output_path)
-        plt.savefig(os.path.join(output_path, f'{filename}.png'))
+        if population:
+            plt.savefig(os.path.join(output_path, filename + '_population.png'))
+        else:
+            plt.savefig(os.path.join(output_path, filename + '.png'))
 
     plt.show()
 
     return correlation_matrix
 
 
-def load_vr_session_info(sess_data_path, VR_data=None, options=None):
+def load_vr_session_info(sess_data_path, VR_data=None, options=None):  # TODO: deprecated? 
     '''Get landmark, goal, and lap information from VR data.'''
 
     # Load VR data 
@@ -997,33 +1047,58 @@ def load_vr_session_info(sess_data_path, VR_data=None, options=None):
 
 
 def get_lm_entry_exit(session, positions):
-
     '''Find data idx closest to landmark entry and exit.'''
 
     lm_entry_idx = []
     lm_exit_idx = []
-
+    
     if session['num_laps'] > 1:
         search_start = 0  
 
-        for i, (lm_start, lm_end) in enumerate(session['all_landmarks']):
-            idx_candidates = np.where((positions[search_start:] >= lm_start) & (positions[search_start:] <= lm_end))[0]
-            if len(idx_candidates) > 0:
-                lm_entry_idx.append(idx_candidates[0] + search_start)
-                lm_exit_idx.append(idx_candidates[-1] + search_start)  # TODO: confirm
-                search_start += idx_candidates[0] 
-            else:
-                print(f"Warning: no match found for landmark {i} with bounds {lm_start}-{lm_end}")
-                lm_entry_idx.append(None)
+        for i, (lm_start, lm_end) in enumerate(session['all_landmarks'][:-1]):  
+            lm_start_idx = np.where(positions[search_start:] >= lm_start)[0][0] + search_start
 
+            next_lm_start = session['all_landmarks'][i+1,0]
+            next_lm_start_idx = np.where(positions[search_start:] >= next_lm_start)[0][0] + search_start
+
+            if next_lm_start < lm_start:    # position reset 
+                # print('Lap change')
+                distance = 10 ** (int(math.log10(len(positions))) - 1) 
+                height = math.floor(max(positions)/10)*10
+                lap_change_idx = find_peaks(positions[search_start:], height=height, distance=distance)[0][0] + 1
+
+                next_lm_start_idx = search_start + lap_change_idx + 1
+
+            start_candidates = np.where(positions[search_start:next_lm_start_idx] >= lm_start)[0]
+            entry_idx = start_candidates[0] + search_start
+            
+            end_candidates = np.where(positions[entry_idx:next_lm_start_idx] >= lm_end)[0]
+            exit_idx = end_candidates[0] + entry_idx
+
+            search_start = next_lm_start_idx 
+
+            lm_entry_idx.append(entry_idx)
+            lm_exit_idx.append(exit_idx)
+
+        # last landmark 
+        last_lm_start_idx = np.where(positions[search_start:] >= session['all_landmarks'][-1,0])[0][0] + search_start
+        last_lm_end_idx = np.where(positions[search_start:] >= session['all_landmarks'][-1,1])[0]
+        if len(last_lm_end_idx) != 0:
+            last_lm_end_idx = last_lm_end_idx[0] + search_start
+            lm_entry_idx.append(last_lm_start_idx)  
+            lm_exit_idx.append(last_lm_end_idx)
+        else:
+            return np.array(lm_entry_idx), np.array(lm_exit_idx)  # terminate early 
+    
     else:
+        if (positions[0] - session['landmarks'][-1,1]) < (positions[0] - session['landmarks'][0,0]):
+            search_start = np.where(positions <= session['all_landmarks'][0,0])[0][-1]  # the mouse accidentally moved backwards first
+        
         for lm_start in session['all_landmarks'][:,0]:
-            lm_entry_idx.append(np.where(positions >= lm_start)[0][0])
-            # lm_entry_idx2.append(int(np.argmin(np.abs(positions - lm_start)))) 
+            lm_entry_idx.append(np.where(positions[search_start:] >= lm_start)[0][0] + search_start)
 
         for lm_end in session['all_landmarks'][:,1]:
-            # lm_exit_idx.append(int(np.argmin(np.abs(positions - lm_end))))
-            lm_exit_idx.append(np.where(positions <= lm_end)[0][-1])
+            lm_exit_idx.append(np.where(positions[search_start:] <= lm_end)[0][-1] + search_start)
 
     return np.array(lm_entry_idx), np.array(lm_exit_idx)
 
@@ -1050,15 +1125,32 @@ def load_vr_behaviour_data(sess_data_path):
 
 
 def get_landmark_categories(sequence, num_landmarks, session):
+    '''Find the landmarks in the entire session that belong to goals, non-goals and test.'''
+
+    session = get_landmark_ids(sequence, num_landmarks, session)
+
+    # Get the landmarks that belong to each condition  
+    goals_idx = np.where(np.isin(session['all_lms'], session['goal_landmark_id']))[0]
+    non_goals_idx = np.where(np.isin(session['all_lms'], session['non_goal_landmark_id']))[0]
+    test_idx = np.where(np.isin(session['all_lms'], session['test_landmark_id']))[0] if session['test_landmark_id'] is not None else None
+    
+    session['goals_idx'] = goals_idx
+    session['non_goals_idx'] = non_goals_idx
+    session['test_idx'] = test_idx
+
+    return session
+
+
+def get_landmark_ids(sequence, num_landmarks, session):
     '''Define which landmarks belong to goals, non-goals and test.'''
 
     if num_landmarks == 10:     # T5 and T6
         if sequence == 'ABAB':
-            goal_landmark_id = [1, 3, 5, 7]
+            goal_landmark_id = np.array([1, 3, 5, 7])
             test_landmark_id = 9
         elif sequence == 'AABB':  
-            goal_landmark_id = [0, 1, 4, 5]
-            test_landmark_id = 8
+            goal_landmark_id = np.array([0, 1, 4, 5])
+            test_landmark_id = np.array([8, 9])
         non_goal_landmark_id = np.setxor1d(np.arange(0,num_landmarks), np.append(goal_landmark_id, test_landmark_id))
  
     elif num_landmarks == 2:    # T3 and T4
@@ -1067,18 +1159,17 @@ def get_landmark_categories(sequence, num_landmarks, session):
         non_goal_landmark_id = np.setdiff1d(lms, goal_landmark_id)[0]
         test_landmark_id = None
 
-    # Get the landmarks that belong to each condition  
-    goals_idx = np.where(np.isin(session['all_lms'], goal_landmark_id))[0]
-    non_goals_idx = np.where(np.isin(session['all_lms'], non_goal_landmark_id))[0]
-    test_idx = np.where(np.isin(session['all_lms'], test_landmark_id))[0] if test_landmark_id is None else None
-    
-    return goals_idx, non_goals_idx, test_idx
+    session['goal_landmark_id'] = goal_landmark_id
+    session['non_goal_landmark_id'] = non_goal_landmark_id
+    session['test_landmark_id'] = test_landmark_id
+
+    return session
 
 
 def get_landmark_category_rew_idx(sequence, num_landmarks, session, VR_data, nidaq_data):
     '''Find indices also in non-goal landmarks corresponding to the same time after landmark entry as mean reward time lag.'''
     
-    reward_idx = get_rewards(VR_data, nidaq_data, print_output=True)
+    reward_idx = get_rewards(VR_data, nidaq_data, session, print_output=True)
 
     rew_lm_entry_idx, miss_lm_entry_idx, nongoal_lm_entry_idx, test_lm_entry_idx = get_landmark_category_entries(VR_data, nidaq_data, sequence, num_landmarks, session)
     
@@ -1091,8 +1182,26 @@ def get_landmark_category_rew_idx(sequence, num_landmarks, session, VR_data, nid
     nongoal_rew_idx = nongoal_lm_entry_idx + rew_time_lag  
     test_rew_idx = test_lm_entry_idx + rew_time_lag
 
-    return rew_time_lag, reward_idx, miss_rew_idx, nongoal_rew_idx, test_rew_idx
+    session['rew_time_lag'] = rew_time_lag
+    session['reward_idx'] = reward_idx
+    session['miss_rew_idx'] = miss_rew_idx
+    session['nongoal_rew_idx'] = nongoal_rew_idx
+    session['test_rew_idx'] = test_rew_idx
 
+    return session
+
+
+def get_imag_rew_idx(nidaq_data, session, lm_idx):
+    '''Find indices after landmark entry where reward would be expected.'''
+    
+    lm_entry_idx, _ = get_lm_entry_exit(session, positions=nidaq_data['position'])
+
+    lm_entry_idx = np.array([lm_entry_idx[i] for i in lm_idx])
+
+    imag_rew_idx = lm_entry_idx + session['rew_time_lag']
+
+    return imag_rew_idx
+    
 
 def get_landmark_category_entries(VR_data, nidaq_data, sequence, num_landmarks, session):
     '''Find the indices of landmark entry for different types of landmarks: rewarded, miss, non-goal, test.'''
@@ -1100,16 +1209,16 @@ def get_landmark_category_entries(VR_data, nidaq_data, sequence, num_landmarks, 
     lm_entry_idx, _ = get_lm_entry_exit(session, positions=nidaq_data['position'])
 
     # Find category for each landmark 
-    goals_idx, non_goals_idx, test_idx = get_landmark_categories(sequence, num_landmarks, session)
+    session = get_landmark_categories(sequence, num_landmarks, session)
 
     # Find the rewarded landmarks 
     rewarded_landmarks = get_rewarded_landmarks(VR_data, nidaq_data, session)
 
     # Find landmark entry indices for each landmark category
     rew_lm_entry_idx = [lm_entry_idx[i] for i in rewarded_landmarks]
-    miss_lm_entry_idx = np.array([lm_entry_idx[i] for i in goals_idx if i not in rewarded_landmarks])
-    nongoal_lm_entry_idx = np.array([lm_entry_idx[i] for i in non_goals_idx])
-    test_lm_entry_idx = np.array([lm_entry_idx[i] for i in test_idx])
+    miss_lm_entry_idx = np.array([lm_entry_idx[i] for i in session['goals_idx'] if i not in rewarded_landmarks])
+    nongoal_lm_entry_idx = np.array([lm_entry_idx[i] for i in session['non_goals_idx']])
+    test_lm_entry_idx = np.array([lm_entry_idx[i] for i in session['test_idx']]) if session['test_idx'] is not None else np.array([])
 
     assert len(rew_lm_entry_idx) + len(miss_lm_entry_idx) + len(nongoal_lm_entry_idx) + len(test_lm_entry_idx) == len(session['all_lms']), 'Some landmarks have not been considered.'
 
@@ -1119,19 +1228,20 @@ def get_landmark_category_entries(VR_data, nidaq_data, sequence, num_landmarks, 
 def get_rewarded_landmarks(VR_data, nidaq_data, session):
     '''Find the indices of rewarded (lick-triggered) landmarks.'''
 
-    reward_idx = get_rewards(VR_data, nidaq_data, print_output=False)
+    reward_idx = get_rewards(VR_data, nidaq_data, session, print_output=False)
+    lm_entry_idx, lm_exit_idx = get_lm_entry_exit(session, positions=nidaq_data['position'])
 
     # Find rewarded landmarks 
-    reward_positions = nidaq_data['position'][reward_idx]
+    reward_positions = nidaq_data['distance'][reward_idx]  # using flattened position array 
 
-    rewarded_landmarks = [i for i, (start, end) in enumerate(session['all_landmarks']) 
-                        if np.any((reward_positions >= start) & (reward_positions <= end))]  # TODO: what is wrong with the last reward? 
+    rewarded_landmarks = [i for i, (start, end) in enumerate(zip(np.floor(nidaq_data['distance'][lm_entry_idx]), np.ceil(nidaq_data['distance'][lm_exit_idx]))) 
+                            if np.any((np.ceil(reward_positions) >= start) & (np.floor(reward_positions) <= end))] 
     
     return rewarded_landmarks
 
 
-def get_rewards(VR_data, nidaq_data, print_output=False):
-    '''Find the indices of rewards in the nidaq logging file.'''
+def get_rewards(VR_data, nidaq_data, session, print_output=False):
+    '''Find the indices of lick-triggered rewards in the nidaq logging file.'''
 
     # Find different types of rewards from VR data
     rewards_VR, assistant_reward_idx, manual_reward_idx = get_VR_rewards(VR_data)
@@ -1148,7 +1258,8 @@ def get_rewards(VR_data, nidaq_data, print_output=False):
     reward_idx = np.delete(reward_idx, rewards_to_remove)
 
     # Confirm number of rewards makes sense
-    reward_idx = reward_idx[0:-1]  # TODO: Deal with last reward...
+    if session['all_landmarks'][-1,1] < nidaq_data['position'][reward_idx[-1]]:  # ensure mouse has left last rewarded landmark 
+        reward_idx = reward_idx[0:-1]  
     num_rewards = len(reward_idx)  
 
     if print_output:

@@ -63,6 +63,8 @@ def roicat_align_rois(roicat_dir, roicat_data_name, sessions_to_align, basepath,
         iscell[s] = np.load(datapath)[:,0]
 
     # Apply the mask to the aligned data
+    print((roi_labels))
+    print((iscell))
     labels_iscell = roicat.util.mask_UCIDs_with_iscell(
         ucids=roi_labels,
         iscell=iscell

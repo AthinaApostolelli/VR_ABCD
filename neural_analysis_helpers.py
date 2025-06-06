@@ -789,6 +789,7 @@ def get_map_correlation(psths, average_psths, conditions, population=False, zsco
                     psth_data[i] = stats.zscore(psth_data[i], axis=None)
 
             data_indices = list(average_psth_data.keys())
+            print(data_indices)
             if reference not in average_psth_data.keys():
                 raise ValueError(f'Reference condition {reference} should be one of the keys of the input dict.')
             ref_cond = data_indices.index(reference)
@@ -810,10 +811,11 @@ def get_map_correlation(psths, average_psths, conditions, population=False, zsco
 
     # Calculate correlations
     for c, idx in enumerate(data_indices):
+        print(c)
         if population is True:
             for t in range(num_timebins):
                 if idx == reference:
-                    if np.all(np.isfinite(sorting_data[:,t])) and np.all(np.isfinite(sorting_data[:,t])):
+                    if np.all(np.isfinite(sorting_data[:,t])) and np.all(np.isfinite(testing_data[:,t])):
                         r, _ = stats.pearsonr(sorting_data[:,t], testing_data[:,t])
                         corrs[c].append(r)
                     else:
@@ -827,7 +829,7 @@ def get_map_correlation(psths, average_psths, conditions, population=False, zsco
         else:
             for n in range(num_neurons):
                 if idx == reference:
-                    if np.all(np.isfinite(sorting_data[n])) and np.all(np.isfinite(sorting_data[n])):
+                    if np.all(np.isfinite(sorting_data[n])) and np.all(np.isfinite(testing_data[n])):
                         r, _ = stats.pearsonr(sorting_data[n], testing_data[n])
                         corrs[c].append(r)
                     else:
@@ -854,22 +856,6 @@ def get_map_correlation(psths, average_psths, conditions, population=False, zsco
                 labels.append(f"{cond}\nvs\n{conditions[ref_cond]}")
             else:
                 labels.append(f"{cond} vs {conditions[ref_cond]}")
-
-    # Set up colors 
-    # if any(re.match(r'^T\d+', cond) for cond in conditions):
-    #     protocol_nums_found = set()
-    #     for cond in conditions:
-    #         match = re.match(r'^T(\d+)', cond)
-    #         if match:
-    #             protocol_nums_found.add(int(match.group(1)))
-    #     if len(protocol_nums_found) > 1:
-    #         color_scheme = [c for c in color_scheme[:len(protocol_nums_found)] for _ in range(2)]
-    #         alphas = [1, 0.5] * len(protocol_nums_found)
-    #     else:
-    #         alphas = [1] * len(corrs)
-    # else:
-    #     alphas = [1] * len(corrs)
-    # bar_colors = [to_rgba(c, a) for c, a in zip(color_scheme[:len(corrs)], alphas)]
 
     if color_scheme is None:
         color_scheme = sns.color_palette("Set2", len(corrs))   # Fallback color scheme if none is given
@@ -991,7 +977,7 @@ def get_map_correlation_matrix(all_average_psths, conditions, population=False, 
     return correlation_matrix
 
 
-def load_vr_session_info(sess_data_path, VR_data=None, options=None):  # TODO: redundant? 
+def load_vr_session_info(sess_data_path, VR_data=None, options=None):  # TODO: deprecated? 
     '''Get landmark, goal, and lap information from VR data.'''
 
     # Load VR data 
@@ -1105,13 +1091,14 @@ def get_lm_entry_exit(session, positions):
             return np.array(lm_entry_idx), np.array(lm_exit_idx)  # terminate early 
     
     else:
+        if (positions[0] - session['landmarks'][-1,1]) < (positions[0] - session['landmarks'][0,0]):
+            search_start = np.where(positions <= session['all_landmarks'][0,0])[0][-1]  # the mouse accidentally moved backwards first
+        
         for lm_start in session['all_landmarks'][:,0]:
-            lm_entry_idx.append(np.where(positions >= lm_start)[0][0])
-            # lm_entry_idx2.append(int(np.argmin(np.abs(positions - lm_start)))) 
+            lm_entry_idx.append(np.where(positions[search_start:] >= lm_start)[0][0] + search_start)
 
         for lm_end in session['all_landmarks'][:,1]:
-            # lm_exit_idx.append(int(np.argmin(np.abs(positions - lm_end))))
-            lm_exit_idx.append(np.where(positions <= lm_end)[0][-1])
+            lm_exit_idx.append(np.where(positions[search_start:] <= lm_end)[0][-1] + search_start)
 
     return np.array(lm_entry_idx), np.array(lm_exit_idx)
 
@@ -1163,7 +1150,7 @@ def get_landmark_ids(sequence, num_landmarks, session):
             test_landmark_id = 9
         elif sequence == 'AABB':  
             goal_landmark_id = np.array([0, 1, 4, 5])
-            test_landmark_id = 8
+            test_landmark_id = np.array([8, 9])
         non_goal_landmark_id = np.setxor1d(np.arange(0,num_landmarks), np.append(goal_landmark_id, test_landmark_id))
  
     elif num_landmarks == 2:    # T3 and T4
@@ -1247,8 +1234,8 @@ def get_rewarded_landmarks(VR_data, nidaq_data, session):
     # Find rewarded landmarks 
     reward_positions = nidaq_data['distance'][reward_idx]  # using flattened position array 
 
-    rewarded_landmarks = [i for i, (start, end) in enumerate(zip(np.round(nidaq_data['distance'][lm_entry_idx]), np.round(nidaq_data['distance'][lm_exit_idx]))) 
-                            if np.any((np.round(reward_positions) >= start) & (np.round(reward_positions) <= end))] 
+    rewarded_landmarks = [i for i, (start, end) in enumerate(zip(np.floor(nidaq_data['distance'][lm_entry_idx]), np.ceil(nidaq_data['distance'][lm_exit_idx]))) 
+                            if np.any((np.ceil(reward_positions) >= start) & (np.floor(reward_positions) <= end))] 
     
     return rewarded_landmarks
 
@@ -1271,7 +1258,7 @@ def get_rewards(VR_data, nidaq_data, session, print_output=False):
     reward_idx = np.delete(reward_idx, rewards_to_remove)
 
     # Confirm number of rewards makes sense
-    if session['all_landmarks'][-1,1] > nidaq_data['position'][reward_idx[-1]]:  # ensure mouse has left last rewarded landmark 
+    if session['all_landmarks'][-1,1] < nidaq_data['position'][reward_idx[-1]]:  # ensure mouse has left last rewarded landmark 
         reward_idx = reward_idx[0:-1]  
     num_rewards = len(reward_idx)  
 
