@@ -202,53 +202,6 @@ def get_tuned_neurons(average_psth, event='reward', time_around=1, funcimg_frame
     return tuned_neurons
 
 
-def plot_psth_single_neurons(psth, average_psth, neurons, time_around=1, num_neurons=10, avg_only=False, zscoring=True, color=None, axis=None):
-    '''Plot the PSTH around events for specific neurons.'''
-
-    num_timebins = average_psth.shape[1]
-    num_rewards = psth.shape[1]
-    if isinstance(neurons, int) or np.isscalar(neurons):
-        neurons = [neurons]
-
-    # z-scoring
-    if zscoring:
-        average_psth = stats.zscore(np.array(average_psth), axis=1)       
-        psth = stats.zscore(np.array(psth), axis=2)
-
-    for i, n in enumerate(neurons[:num_neurons]):
-        if axis is None:
-            fig, ax = plt.subplots(1, 1, figsize=(2,2), sharey=True)
-        else: 
-            ax = axis
-        if not avg_only:
-            for r in range(num_rewards):
-                ax.plot(psth[n, r, :])
-            linewidth = 3
-        else:
-            linewidth = 2
-        
-        if color == 'blue':
-            label = '2/3 Alternation'
-        elif color == 'red':
-            label = '3/3 Discrimination'
-        else:
-            label = None
-
-        ax.plot(average_psth[n, :], color=color if color is not None else 'black', linewidth=linewidth, label=label) 
-        ax.axvspan(num_timebins/2, num_timebins, color='gray', alpha=0.5)
-        ax.set_xlabel('Time')
-        ax.set_xticks([-0.5, num_timebins/2-0.5, num_timebins-0.5])
-        if time_around == int(time_around):
-            xticklabels = [int(-time_around), 0, int(time_around)]
-        else:
-            xticklabels = [round(-time_around, 1), 0, round(time_around, 1)]
-        ax.set_xticklabels(xticklabels)
-        ax.spines[['right', 'top']].set_visible(False)
-        ax.set_ylabel('DF/F')
-
-    return 
-
-
 def get_tuned_neurons_shohei(DF_F, average_psth, neurons, event='reward', time_around=1, funcimg_frame_rate=45, plot_neurons=True, zscoring=True):
     # The response to an event is calculated using the mean z-scored ΔF/F calcium signal 
     # averaged over a window from 0.4 s to 1 s after event onset, baseline-subtracted using 
@@ -792,8 +745,8 @@ def get_map_correlation(psths, average_psths, conditions, population=False, zsco
             for c in range(len(conditions)):
                 average_psth_data.append(stats.zscore(np.array(average_psths[c]), axis=1))
                 # average_psth_data.append(stats.zscore(np.array(average_psths[c]), axis=None))
-                # psth_data = stats.zscore(np.array(psth_data), axis=2)
-                psth_data.append(stats.zscore(np.array(psths[c]), axis=2))
+            # psth_data = stats.zscore(np.array(psth_data), axis=2)
+                psth_data.append(stats.zscore(np.array(psths[c]), axis=1))
                 # psth_data.append(stats.zscore(np.array(psths[c]), axis=None))
         else: 
             average_psth_data = [average_psths[c] for c in range(len(conditions))]
@@ -944,6 +897,7 @@ def get_map_correlation(psths, average_psths, conditions, population=False, zsco
             plt.savefig(os.path.join(output_path, filename + '_population.png'))
         else:
             plt.savefig(os.path.join(output_path, filename + '.png'))
+    # plt.show()
 
     return corrs
 
@@ -1027,7 +981,6 @@ def get_map_correlation_matrix(all_average_psths, conditions, population=False, 
     return correlation_matrix
 
 
-#%% ########  BEHAVIOUR ########
 def load_vr_session_info(sess_data_path, VR_data=None, options=None):  # TODO: deprecated? 
     '''Get landmark, goal, and lap information from VR data.'''
 

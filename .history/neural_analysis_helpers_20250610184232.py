@@ -202,39 +202,17 @@ def get_tuned_neurons(average_psth, event='reward', time_around=1, funcimg_frame
     return tuned_neurons
 
 
-def plot_psth_single_neurons(psth, average_psth, neurons, time_around=1, num_neurons=10, avg_only=False, zscoring=True, color=None, axis=None):
+def plot_psth_single_neurons(psth, average_psth, neurons, time_around=1, num_neurons=10):
     '''Plot the PSTH around events for specific neurons.'''
 
     num_timebins = average_psth.shape[1]
     num_rewards = psth.shape[1]
-    if isinstance(neurons, int) or np.isscalar(neurons):
-        neurons = [neurons]
 
-    # z-scoring
-    if zscoring:
-        average_psth = stats.zscore(np.array(average_psth), axis=1)       
-        psth = stats.zscore(np.array(psth), axis=2)
-
-    for i, n in enumerate(neurons[:num_neurons]):
-        if axis is None:
-            fig, ax = plt.subplots(1, 1, figsize=(2,2), sharey=True)
-        else: 
-            ax = axis
-        if not avg_only:
-            for r in range(num_rewards):
-                ax.plot(psth[n, r, :])
-            linewidth = 3
-        else:
-            linewidth = 2
-        
-        if color == 'blue':
-            label = '2/3 Alternation'
-        elif color == 'red':
-            label = '3/3 Discrimination'
-        else:
-            label = None
-
-        ax.plot(average_psth[n, :], color=color if color is not None else 'black', linewidth=linewidth, label=label) 
+    for n in neurons[:num_neurons]:
+        fig, ax = plt.subplots(1, 1, figsize=(2,2), sharey=True)
+        for r in range(num_rewards):
+            ax.plot(psth[n, r, :])
+        ax.plot(average_psth[n, :], color='black', linewidth=3)      
         ax.axvspan(num_timebins/2, num_timebins, color='gray', alpha=0.5)
         ax.set_xlabel('Time')
         ax.set_xticks([-0.5, num_timebins/2-0.5, num_timebins-0.5])
@@ -792,7 +770,7 @@ def get_map_correlation(psths, average_psths, conditions, population=False, zsco
             for c in range(len(conditions)):
                 average_psth_data.append(stats.zscore(np.array(average_psths[c]), axis=1))
                 # average_psth_data.append(stats.zscore(np.array(average_psths[c]), axis=None))
-                # psth_data = stats.zscore(np.array(psth_data), axis=2)
+            # psth_data = stats.zscore(np.array(psth_data), axis=2)
                 psth_data.append(stats.zscore(np.array(psths[c]), axis=2))
                 # psth_data.append(stats.zscore(np.array(psths[c]), axis=None))
         else: 
