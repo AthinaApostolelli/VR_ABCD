@@ -7,9 +7,6 @@ from scipy.signal import find_peaks
 import pandas as pd
 import yaml
 import math
-from math import log10, floor
-import itertools
-
 import seaborn as sns
 
 
@@ -209,11 +206,11 @@ def get_tuned_neurons(psth, event='reward', time_around=1, funcimg_frame_rate=45
     return tuned_neurons, wilcoxon_pval
 
 
-def plot_psth_single_neurons(psth, average_psth, neurons, time_around=1, num_neurons=10, avg_only=False, zscoring=True, pvalues=None, color=None, axis=None):
+def plot_psth_single_neurons(psth, average_psth, neurons, time_around=1, num_neurons=10, avg_only=False, zscoring=True, color=None, axis=None):
     '''Plot the PSTH around events for specific neurons.'''
 
     num_timebins = average_psth.shape[1]
-    num_events = psth.shape[1]
+    num_rewards = psth.shape[1]
     if isinstance(neurons, int) or np.isscalar(neurons):
         neurons = [neurons]
 
@@ -228,7 +225,7 @@ def plot_psth_single_neurons(psth, average_psth, neurons, time_around=1, num_neu
         else: 
             ax = axis
         if not avg_only:
-            for r in range(num_events):
+            for r in range(num_rewards):
                 ax.plot(psth[n, r, :])
             linewidth = 3
         else:
@@ -242,12 +239,6 @@ def plot_psth_single_neurons(psth, average_psth, neurons, time_around=1, num_neu
             label = None
 
         ax.plot(average_psth[n, :], color=color if color is not None else 'black', linewidth=linewidth, label=label) 
-        if avg_only and not zscoring:  # add sem 
-            ax.fill_between(np.arange(num_timebins),
-                        average_psth[n, :] - stats.sem(psth[n, :, :], axis=0),
-                        average_psth[n, :] + stats.sem(psth[n, :, :], axis=0),
-                        color=color if color is not None else 'black',
-                        alpha=0.3)
         ax.axvspan(num_timebins/2, num_timebins, color='gray', alpha=0.5)
         ax.set_xlabel('Time')
         ax.set_xticks([-0.5, num_timebins/2-0.5, num_timebins-0.5])
@@ -257,9 +248,7 @@ def plot_psth_single_neurons(psth, average_psth, neurons, time_around=1, num_neu
             xticklabels = [round(-time_around, 1), 0, round(time_around, 1)]
         ax.set_xticklabels(xticklabels)
         ax.spines[['right', 'top']].set_visible(False)
-        ax.set_ylabel(r'z-scored $\Delta$F/F0' if zscoring else r'$\Delta$F/F0')
-        if pvalues is not None:
-            ax.set_title(f'p-value {round(pvalues[i], 3- int(floor(log10(abs(pvalues[i])))) - 1)}')
+        ax.set_ylabel('DF/F')
 
     return 
 
@@ -786,137 +775,6 @@ def plot_condition_psth_map(average_psths, conditions, zscoring=True, time_aroun
             plt.savefig(os.path.join(output_path, f'{condition}_sorting.png'))
         plt.show()
         
-
-def get_rolling_map_correlation(average_psths, conditions, population=False, zscoring=True, color_scheme=None, ax=None, save_plot=False, savepath='', savedir='', filename=''):
-    '''
-    Get the firing map correlation among different conditions against a reference. 
-    The correlation for the reference is calculated by randomly selecting half the trials.
-    If population is True, the correlation is computed across the entire activity map. Otherwise it is calculated on a neuron-by-neuron basis.
-    NOTE: The reference is the index of the data if the data are either a list or a nested dict (will get flattened into a list), but it is a key of the data if the data are a dict. 
-    '''
-    num_neurons = average_psths[0].shape[0]
-    num_windows = average_psths[0].shape[1]
-    num_timebins = average_psths[0].shape[2]
-    num_conditions = len(conditions)
-
-    if zscoring:
-        average_psths = [stats.zscore(psth, axis=2) for psth in average_psths]
-    
-    # 1. Within-condition correlations (rolling across windows)
-    within_corrs = [[[] for _ in range(num_windows - 1)] for _ in range(num_conditions)]
-
-    # 2. Across-condition correlations (between same windows)
-    condition_pairs = list(itertools.combinations(range(num_conditions), 2))
-    across_corrs = [[[] for _ in range(num_windows)] for _ in range(len(condition_pairs))]
-
-    # Calculate within-condition rolling correlations
-    for c in range(num_conditions):
-        for i in range(num_windows - 1):
-            if population:
-                for t in range(num_timebins):
-                    v1 = average_psths[c][:, i, t]
-                    v2 = average_psths[c][:, i + 1, t]
-                    if np.all(np.isfinite(v1)) and np.all(np.isfinite(v2)):
-                        r, _ = stats.pearsonr(v1, v2)
-                        within_corrs[c][i].append(r)
-                    else:
-                        within_corrs[c][i].append(np.nan)
-            else:
-                for n in range(num_neurons):
-                    v1 = average_psths[c][n, i, :]
-                    v2 = average_psths[c][n, i + 1, :]
-                    if np.all(np.isfinite(v1)) and np.all(np.isfinite(v2)):
-                        r, _ = stats.pearsonr(v1, v2)
-                        within_corrs[c][i].append(r)
-                    else:
-                        within_corrs[c][i].append(np.nan)
-
-    # Calculate across-condition correlations (same window index)
-    for pair_idx, (c1, c2) in enumerate(condition_pairs):
-        for i in range(num_windows):
-            if population:
-                for t in range(num_timebins):
-                    v1 = average_psths[c1][:, i, t]
-                    v2 = average_psths[c2][:, i, t]
-                    if np.all(np.isfinite(v1)) and np.all(np.isfinite(v2)):
-                        r, _ = stats.pearsonr(v1, v2)
-                        across_corrs[pair_idx][i].append(r)
-                    else:
-                        across_corrs[pair_idx][i].append(np.nan)
-            else:
-                for n in range(num_neurons):
-                    v1 = average_psths[c1][n, i, :]
-                    v2 = average_psths[c2][n, i, :]
-                    if np.all(np.isfinite(v1)) and np.all(np.isfinite(v2)):
-                        r, _ = stats.pearsonr(v1, v2)
-                        across_corrs[pair_idx][i].append(r)
-                    else:
-                        across_corrs[pair_idx][i].append(np.nan)
-
-    # === Plotting ===
-    # 1. Each neuron correlation trace & mean
-    fig, ax = plt.subplots(1, len(within_corrs), figsize=(8,3))
-    ax = ax.ravel()
-
-    for i in range(len(within_corrs)):
-        mean_across_neurons = [np.mean(within_corrs[i][w]) for w in range(len(within_corrs[i]))]
-        ax[i].plot(within_corrs[i])
-        ax[i].plot(mean_across_neurons, color='black')
-        ax[i].set_title(f"{conditions[i]} vs {conditions[i]}")
-
-    fig, ax = plt.subplots(1, len(across_corrs), figsize=(4,3))
-    if len(across_corrs) > 1:
-        ax = ax.ravel()
-    for i in range(len(across_corrs)):
-        mean_across_neurons = [np.mean(across_corrs[i][w]) for w in range(len(across_corrs[i]))]
-        if len(across_corrs) > 1:
-            ax.plot(across_corrs[i])
-            ax.plot(mean_across_neurons, color='black')
-            ax.set_title(f"{conditions[int(condition_pairs[0][0])]} vs {conditions[int(condition_pairs[0][1])]}")
-        else:
-            ax.plot(across_corrs[i])
-            ax.plot(mean_across_neurons, color='black')
-            ax.set_title(f"{conditions[int(condition_pairs[0][0])]} vs {conditions[int(condition_pairs[0][1])]}")
-
-    # 2. Mean +/- sem correlation trace 
-    fig, ax = plt.subplots(1, len(within_corrs) + len(across_corrs), figsize=(12,3), sharey=True, sharex=True)
-    ax = ax.ravel()
-
-    k = 0 
-    for i in range(len(within_corrs)):
-        mean_across_neurons = np.array([np.mean(within_corrs[i][w]) for w in range(len(within_corrs[i]))])
-        sem_across_neurons = stats.sem(np.array([within_corrs[i][w] for w in range(len(within_corrs[i]))]), axis=1)
-
-        ax[k].fill_between(np.arange(len(within_corrs[i])),
-                        mean_across_neurons - sem_across_neurons,
-                        mean_across_neurons + sem_across_neurons,
-                        color='black',
-                        alpha=0.3)
-        # ax[i].plot(within_corrs[i])
-        ax[k].plot(mean_across_neurons, color='black')
-        ax[k].set_title(f"{conditions[i]} vs {conditions[i]}")
-        ax[k].set_xlabel('Lap block')
-        k += 1
-
-    for j in range(len(across_corrs)):
-        mean_across_neurons = np.array([np.mean(across_corrs[j][w]) for w in range(len(across_corrs[j]))])
-        sem_across_neurons = stats.sem(np.array([across_corrs[j][w] for w in range(len(across_corrs[j]))]), axis=1)
-
-        ax[k].plot(mean_across_neurons, color='black')
-        ax[k].fill_between(np.arange(len(across_corrs[j])),
-                    mean_across_neurons - sem_across_neurons,
-                    mean_across_neurons + sem_across_neurons,
-                    color='black',
-                    alpha=0.3)
-        ax[k].set_title(f"{conditions[int(condition_pairs[0][0])]} vs {conditions[int(condition_pairs[0][1])]}")
-        ax[k].set_xlabel('Lap block')
-        k += 1
-
-    # TODO: add saving options
-        
-    return within_corrs, across_corrs, condition_pairs
-
-
 
 def get_map_correlation(psths, average_psths, conditions, population=False, zscoring=True, reference=0, color_scheme=None, ax=None, save_plot=False, savepath='', savedir='', filename=''):
     '''

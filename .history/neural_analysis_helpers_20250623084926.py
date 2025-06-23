@@ -802,6 +802,7 @@ def get_rolling_map_correlation(average_psths, conditions, population=False, zsc
     if zscoring:
         average_psths = [stats.zscore(psth, axis=2) for psth in average_psths]
     
+    # TODO: stopped here
     # 1. Within-condition correlations (rolling across windows)
     within_corrs = [[[] for _ in range(num_windows - 1)] for _ in range(num_conditions)]
 
@@ -829,6 +830,12 @@ def get_rolling_map_correlation(average_psths, conditions, population=False, zsc
                         r, _ = stats.pearsonr(v1, v2)
                         within_corrs[c][i].append(r)
                     else:
+                        print('something is wrong')
+                        print(f"[Function] Issue at c={c}, i={i}, n={n}")
+                        print("v1:", v1)
+                        print("v2:", v2)
+                        print("finite v1:", np.all(np.isfinite(v1)))
+                        print("finite v2:", np.all(np.isfinite(v2)))
                         within_corrs[c][i].append(np.nan)
 
     # Calculate across-condition correlations (same window index)
@@ -853,67 +860,6 @@ def get_rolling_map_correlation(average_psths, conditions, population=False, zsc
                     else:
                         across_corrs[pair_idx][i].append(np.nan)
 
-    # === Plotting ===
-    # 1. Each neuron correlation trace & mean
-    fig, ax = plt.subplots(1, len(within_corrs), figsize=(8,3))
-    ax = ax.ravel()
-
-    for i in range(len(within_corrs)):
-        mean_across_neurons = [np.mean(within_corrs[i][w]) for w in range(len(within_corrs[i]))]
-        ax[i].plot(within_corrs[i])
-        ax[i].plot(mean_across_neurons, color='black')
-        ax[i].set_title(f"{conditions[i]} vs {conditions[i]}")
-
-    fig, ax = plt.subplots(1, len(across_corrs), figsize=(4,3))
-    if len(across_corrs) > 1:
-        ax = ax.ravel()
-    for i in range(len(across_corrs)):
-        mean_across_neurons = [np.mean(across_corrs[i][w]) for w in range(len(across_corrs[i]))]
-        if len(across_corrs) > 1:
-            ax.plot(across_corrs[i])
-            ax.plot(mean_across_neurons, color='black')
-            ax.set_title(f"{conditions[int(condition_pairs[0][0])]} vs {conditions[int(condition_pairs[0][1])]}")
-        else:
-            ax.plot(across_corrs[i])
-            ax.plot(mean_across_neurons, color='black')
-            ax.set_title(f"{conditions[int(condition_pairs[0][0])]} vs {conditions[int(condition_pairs[0][1])]}")
-
-    # 2. Mean +/- sem correlation trace 
-    fig, ax = plt.subplots(1, len(within_corrs) + len(across_corrs), figsize=(12,3), sharey=True, sharex=True)
-    ax = ax.ravel()
-
-    k = 0 
-    for i in range(len(within_corrs)):
-        mean_across_neurons = np.array([np.mean(within_corrs[i][w]) for w in range(len(within_corrs[i]))])
-        sem_across_neurons = stats.sem(np.array([within_corrs[i][w] for w in range(len(within_corrs[i]))]), axis=1)
-
-        ax[k].fill_between(np.arange(len(within_corrs[i])),
-                        mean_across_neurons - sem_across_neurons,
-                        mean_across_neurons + sem_across_neurons,
-                        color='black',
-                        alpha=0.3)
-        # ax[i].plot(within_corrs[i])
-        ax[k].plot(mean_across_neurons, color='black')
-        ax[k].set_title(f"{conditions[i]} vs {conditions[i]}")
-        ax[k].set_xlabel('Lap block')
-        k += 1
-
-    for j in range(len(across_corrs)):
-        mean_across_neurons = np.array([np.mean(across_corrs[j][w]) for w in range(len(across_corrs[j]))])
-        sem_across_neurons = stats.sem(np.array([across_corrs[j][w] for w in range(len(across_corrs[j]))]), axis=1)
-
-        ax[k].plot(mean_across_neurons, color='black')
-        ax[k].fill_between(np.arange(len(across_corrs[j])),
-                    mean_across_neurons - sem_across_neurons,
-                    mean_across_neurons + sem_across_neurons,
-                    color='black',
-                    alpha=0.3)
-        ax[k].set_title(f"{conditions[int(condition_pairs[0][0])]} vs {conditions[int(condition_pairs[0][1])]}")
-        ax[k].set_xlabel('Lap block')
-        k += 1
-
-    # TODO: add saving options
-        
     return within_corrs, across_corrs, condition_pairs
 
 
