@@ -917,6 +917,149 @@ def get_rolling_map_correlation(average_psths, conditions, population=False, zsc
     return within_corrs, across_corrs, condition_pairs
 
 
+def get_window_similarity_matrix(average_psths, conditions, population=False, zscoring=True, plot=True):
+    """
+    Compute full window-by-window correlation matrices for each condition.
+    Returns one similarity matrix per condition.
+
+    Parameters:
+        average_psths: list of np.arrays (num_neurons x num_windows x num_timebins) per condition
+        conditions: list of condition names (same order as average_psths)
+        population: if True, correlate population vectors, otherwise per-neuron average
+        zscoring: whether to z-score each neuron's time series before computing similarity
+        plot: whether to show the matrices
+
+    Returns:
+        similarity_matrices: list of np.arrays (num_windows x num_windows) for each condition
+    """
+    num_neurons = average_psths[0].shape[0]
+    num_windows = average_psths[0].shape[1]
+    num_timebins = average_psths[0].shape[2]
+    num_conditions = len(conditions)
+
+    if zscoring:
+        average_psths = [stats.zscore(psth, axis=2) for psth in average_psths]
+
+    similarity_matrices = []
+
+    # Compute within condition similarity matrix
+    for c, psth in enumerate(average_psths):
+
+        if population:
+            # Store one sim_matrix per timebin, then average
+            sim_matrix_all_timebins = np.full((num_timebins, num_windows, num_windows), np.nan)
+
+            for i in range(num_windows):
+                for j in range(num_windows):
+                    for t in range(num_timebins):
+                        v1 = psth[:, i, t]
+                        v2 = psth[:, j, t]
+                        if np.all(np.isfinite(v1)) and np.all(np.isfinite(v2)):
+                            r, _ = stats.pearsonr(v1, v2)
+                            sim_matrix_all_timebins[t, i, j] = r
+                        else:
+                            sim_matrix_all_timebins[t, i, j] = np.nan
+                    
+            # Average across timebins
+            sim_matrix = np.nanmean(sim_matrix_all_timebins, axis=0)
+
+        else:
+            # Store one sim_matrix per neuron, then average
+            sim_matrix_all_neurons = np.full((num_neurons, num_windows, num_windows), np.nan)
+
+            for i in range(num_windows):
+                for j in range(num_windows):
+                    for n in range(num_neurons):
+                        v1 = psth[n, i, :]
+                        v2 = psth[n, j, :]
+                        if np.all(np.isfinite(v1)) and np.all(np.isfinite(v2)):
+                            r, _ = stats.pearsonr(v1, v2)
+                            sim_matrix_all_neurons[n, i, j] = r
+                        else:
+                            sim_matrix_all_neurons[n, i, j] = np.nan
+
+            # Average across neurons
+            sim_matrix = np.nanmean(sim_matrix_all_neurons, axis=0)
+
+        similarity_matrices.append(sim_matrix)
+
+    # Compute across condition similarity matrix
+    condition_pairs = list(itertools.combinations(range(num_conditions), 2))
+    for pair_idx, (c1, c2) in enumerate(condition_pairs):
+
+        if population:
+            # Store one sim_matrix per timebin, then average
+            sim_matrix_all_timebins = np.full((num_timebins, num_windows, num_windows), np.nan)
+
+            for i in range(num_windows):
+                for j in range(num_windows):                    
+                    for t in range(num_timebins):
+                        v1 = average_psths[c1][:, i, t]
+                        v2 = average_psths[c2][:, j, t]
+                        if np.all(np.isfinite(v1)) and np.all(np.isfinite(v2)):
+                            r, _ = stats.pearsonr(v1, v2)
+                            sim_matrix_all_timebins[t, i, j] = r
+                        else:
+                            sim_matrix_all_timebins[t, i, j] = np.nan
+                    
+            # Average across timebins
+            sim_matrix = np.nanmean(sim_matrix_all_timebins, axis=0)
+
+        else:
+            # Store one sim_matrix per neuron, then average
+            sim_matrix_all_neurons = np.full((num_neurons, num_windows, num_windows), np.nan)
+
+            for i in range(num_windows):
+                for j in range(num_windows): 
+                    for n in range(num_neurons):
+                        v1 = average_psths[c1][n, i, :]
+                        v2 = average_psths[c2][n, j, :]
+                        if np.all(np.isfinite(v1)) and np.all(np.isfinite(v2)):
+                            r, _ = stats.pearsonr(v1, v2)
+                            sim_matrix_all_neurons[n, i, j] = r
+                        else:
+                            sim_matrix_all_neurons[n, i, j] = np.nan
+
+            # Average across neurons
+            sim_matrix = np.nanmean(sim_matrix_all_neurons, axis=0)
+
+        similarity_matrices.append(sim_matrix)
+
+
+        # Optional plot
+        if plot:
+            fig, ax = plt.subplots(1, len(similarity_matrices), figsize=(12,4), sharex=True, sharey=True)
+            ax = ax.ravel()
+            
+            for i, sim_matrix in enumerate(similarity_matrices):
+                im = ax[i].imshow(sim_matrix, cmap='bwr', origin='lower')
+                fig.colorbar(im, ax=ax[i], shrink=0.8, label='Correlation (r)')  # individual colorbar
+
+                if i < len(average_psths):
+                    ax[i].set_title(f"{conditions[i]} vs {conditions[i]}")
+                else:
+                    ax[i].set_title(f"{conditions[int(condition_pairs[0][0])]} vs {conditions[int(condition_pairs[0][1])]}")
+                ax[i].set_xlabel("Lap block")
+                ax[i].set_ylabel("Lap block")
+            # plt.tight_layout()
+
+            fig, ax = plt.subplots(1, len(similarity_matrices), figsize=(12,4), sharex=True, sharey=True)
+            ax = ax.ravel()
+            
+            for i, sim_matrix in enumerate(similarity_matrices):
+                im = ax[i].imshow(sim_matrix, vmin=-1, vmax=1, cmap='bwr', origin='lower')
+
+                if i < len(average_psths):
+                    ax[i].set_title(f"{conditions[i]} vs {conditions[i]}")
+                else:
+                    ax[i].set_title(f"{conditions[int(condition_pairs[0][0])]} vs {conditions[int(condition_pairs[0][1])]}")
+                ax[i].set_xlabel("Lap block")
+                ax[i].set_ylabel("Lap block")
+            # plt.tight_layout()
+            fig.colorbar(im, ax=ax.ravel().tolist(), shrink=0.8, label='Correlation (r)')
+
+    return similarity_matrices
+
 
 def get_map_correlation(psths, average_psths, conditions, population=False, zscoring=True, reference=0, color_scheme=None, ax=None, save_plot=False, savepath='', savedir='', filename=''):
     '''
