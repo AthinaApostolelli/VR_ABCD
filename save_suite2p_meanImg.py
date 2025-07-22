@@ -10,7 +10,7 @@ from align_images import adjust_intensity
 basepath = Path('/Volumes/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2/')
 # basepath = Path('/media/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2/')
 
-sessions = ['TAA0000066/ses-020_date-20250412_protocol-t14']
+sessions = ['TAA0000066/ses-021_date-20250426_protocol-t15']
 
 suite2p_path = 'funcimg/Session/suite2p/plane0'
 n_chan = 1 # 1 / 2
