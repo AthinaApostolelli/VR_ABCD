@@ -8,9 +8,8 @@ from pathlib import Path
 from align_images import adjust_intensity
 
 basepath = Path('/Volumes/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2/')
-# basepath = Path('/media/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2/')
 
-sessions = ['TAA0000066/ses-021_date-20250426_protocol-t15']
+sessions = ['TAA0000066/ses-023_date-20250516_protocol-t17']
 
 suite2p_path = 'funcimg/Session/suite2p/plane0'
 n_chan = 1 # 1 / 2
