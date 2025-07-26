@@ -17,6 +17,7 @@ module load mamba
 source activate suite2p 
 
 animal=TAA0000066
-session=ses-021_date-20250426_protocol-t15
+session=ses-023_date-20250516_protocol-t17
 
-python run_suite2p.py --animal ${animal} --session ${session} 
+python Convert_seg_to_stat.py
+# python run_suite2p.py --animal ${animal} --session ${session} 
