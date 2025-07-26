@@ -6,7 +6,7 @@ from suite2p.extraction.masks import create_cell_pix, create_neuropil_masks, cre
 from suite2p.extraction.extract import extract_traces_from_masks
 from suite2p.detection import roi_stats
 
-sessions = ['TAA0000066/ses-021_date-20250426_protocol-t15', 'TAA0000066/ses-022_date-20250509_protocol-t16', 'TAA00000066/ses-023_date-20250516_protocol-t17'] 
+sessions = ['TAA0000066/ses-023_date-20250516_protocol-t17'] 
 
 for session in sessions: 
     print(f"Processing session: {session}")
