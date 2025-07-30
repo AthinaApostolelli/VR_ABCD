@@ -1718,11 +1718,60 @@ def get_VR_rewards(VR_data):
     return rewards_VR, assistant_reward_idx, manual_reward_idx
 
 
+def get_reward_idx_by_goal(session, ABCD_goals=[1,2,3,4]): # TODO
+    rew_idx = {}    
+    for g, goal in enumerate(ABCD_goals):
+        rew_idx[goal] = np.array([idx for idx in session['rewarded_landmarks'] \
+                                if session['all_lms'][idx] == session['goal_landmark_id'][goal-1]])
+        
+    return rew_idx
+
+
+def get_events_in_surrounding_landmarks(session, nidaq_data, events, time_around, funcimg_frame_rate, label="Event"):
+    """
+    Identify time windows around events that fall within the previous of following landmarks.
+
+    Args:
+        events (list or array): List of event indices (e.g. licks, rewards).
+        time_around (float): Time in seconds around the event to consider.
+        funcimg_frame_rate (float): Frame rate of functional imaging.
+        label (str): Descriptive label for printing.
+    """
+    lm_entry_idx, lm_exit_idx = get_lm_entry_exit(session, positions=nidaq_data['position'])
+
+    time_window = int(time_around * funcimg_frame_rate)
+    print(f"{label}: {len(events)}")
+
+    for i, event in enumerate(events):
+        # Find previous landmark exit
+        lm_exit_candidates = np.where(lm_exit_idx < event)[0]
+        if lm_exit_candidates.size > 0:
+            prev_landmark_idx = lm_exit_candidates[-1]
+        else:
+            prev_landmark_idx = 0
+
+        # Find next landmark entry
+        lm_entry_candidates = np.where(lm_entry_idx > event)[0]
+        if lm_entry_candidates.size > 0:
+            next_landmark_idx = lm_entry_candidates[0]
+        else:
+            next_landmark_idx = len(lm_entry_idx) - 1
+
+        # Check if window overlaps with a landmark
+        in_landmark = (
+            (lm_entry_idx[next_landmark_idx] <= event + time_window) or
+            (lm_exit_idx[prev_landmark_idx] >= event - time_window)
+        )
+
+        if in_landmark:
+            print(i, event - time_window, event + time_window)
+
+
 def get_licks(nidaq_data, session, print_output=False):
     '''Find the indices of licks in the nidaq logging file.'''
 
     # Find licks in NIDAQ data
-    lick_idx = np.where(nidaq_data['licks'] == 1)[0]  
+    lick_idx = np.where(nidaq_data['licks'] >= 1)[0]  
 
     # Confirm number of rewards makes sense
     if session['all_landmarks'][-1,1] < nidaq_data['position'][lick_idx[-1]]:  # TODO ensure mouse has left last licked landmark 
@@ -2005,7 +2054,7 @@ def get_smoothed_lick_rate(nidaq_data, session):
     return session
 
 
-def get_event_lick_rate(session, event_idx, time_around=(-1,3), funcimg_frame_rate=45):
+def get_event_lick_rate(session, nidaq_data, event_idx, time_around=(-1,3), funcimg_frame_rate=45):
     """Get lick rate per frame as a smoothed sliding window around an event"""
     
     # Handle single int input as symmetric window
@@ -2026,7 +2075,8 @@ def get_event_lick_rate(session, event_idx, time_around=(-1,3), funcimg_frame_ra
 
     # Find licks within this window
     binary_licks = np.zeros_like(window_indices, dtype=int)
-    binary_licks = np.isin(window_indices, session['lick_idx']).astype(int)
+    mask = np.isin(window_indices, session['thresholded_lick_idx'])
+    binary_licks[mask] = nidaq_data['licks'][window_indices[mask]]
 
     # Get smoothed lick rate 
     event_lick_rate = np.empty_like(window_indices, dtype=float)
@@ -2044,9 +2094,9 @@ def get_lm_lick_rate(nidaq_data, session):
 
     lm_lick_rate = {}
 
-    # Create a binary lick map for the entire session
+    # Create a binary lick map for the entire session 
     binary_licks = np.zeros(len(nidaq_data['position']))
-    binary_licks[session['thresholded_lick_idx']] = 1
+    binary_licks[session['thresholded_lick_idx']] = nidaq_data['licks'][session['thresholded_lick_idx']] # (actually not binary)
 
     for lap in range(session['num_laps']):
         for lm in range(len(session['all_lms'])):
@@ -2076,7 +2126,7 @@ def get_binned_lick_rate(nidaq_data, session):  # TODO
 
     # Create a binary lick map for the entire session
     binary_licks = np.zeros(len(nidaq_data['position']))
-    binary_licks[session['thresholded_lick_idx']] = 1
+    binary_licks[session['thresholded_lick_idx']] = nidaq_data['licks'][session['thresholded_lick_idx']] # (actually not binary)
 
     for lap in range(session['num_laps']):
         for lm in range(len(session['all_lms']) * 2):
