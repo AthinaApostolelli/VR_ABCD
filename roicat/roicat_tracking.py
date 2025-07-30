@@ -31,12 +31,6 @@ dir_allOuterFolders = basepath
 pathSuffixToStat = 'stat.npy'
 pathSuffixToOps = 'ops.npy'
 
-# sessions = ['ses-005_date-20250218_protocol-t0', 'ses-006_date-20250224_protocol-t1', 'ses-007_date-20250304_protocol-t2',
-# 'ses-008_date-20250306_protocol-t3','ses-010_date-20250314_protocol-t4','ses-011_date-20250315_protocol-t5','ses-012_date-20250318_protocol-t6',
-# 'ses-013_date-20250320_protocol-t7','ses-014_date-20250326_protocol-t8','ses-015_date-20250327_protocol-t9','ses-016_date-20250330_protocol-t10',
-# 'ses-017_date-20250331_protocol-t11','ses-018_date-20250403_protocol-t12','ses-019_date-20250404_protocol-t13','ses-020_date-20250412_protocol-t14', 
-# 'ses-021_date-20250426_protocol-t15', 'ses-022_date-20250509_protocol-t16', 'ses-023_date-20250516_protocol-t17']
-
 paths_allStat = [str(Path(dir_allOuterFolders) / session / 'funcimg/Session/suite2p/plane0' / pathSuffixToStat) for session in sessions]
 paths_allOps  = [str(Path(path).resolve().parent / pathSuffixToOps) for path in paths_allStat]
 
@@ -166,8 +160,24 @@ aligner.fit_geometric(
     verbose=True,  ## Set to 3 to view plots of the alignment process if available for the method.
 )
 
-fig = aligner.plot_alignment_results_geometric()
-fig.savefig(str(Path(dir_save).resolve() / 'visualization' / 'FOV_images_aligned_geometric.png'))
+try:
+    fig, _ = aligner.plot_alignment_results_geometric()
+    fig.savefig(str(Path(dir_save).resolve() / 'visualization' / 'FOV_images_aligned_geometric.png'))
+except Exception as e:
+        print(f"Failed to save FOV_images_aligned_geometric.png: {e}")
+
+roicat.helpers.save_gif(
+    array=roicat.helpers.add_text_to_images(
+        images=[((f / np.max(f)) * 255).astype(np.uint8) for f in aligner.ims_registered_geo], 
+        text=[[f"{ii}",] for ii in range(len(data.FOV_images))], 
+        font_size=3,
+        line_width=10,
+        position=(30, 90),
+    ), 
+    path=str(Path(dir_save).resolve() / 'visualization' / 'FOV_images_aligned_geometric.gif'),
+    frameRate=10,
+    loop=0,
+)
 
 # 3. Fit non-rigid transformation 
 aligner.fit_nonrigid(
@@ -193,30 +203,12 @@ aligner.fit_nonrigid(
 )
 
 aligner.transform_images_nonrigid(FOV_images)
-fig = aligner.plot_alignment_results_nonrigid()
-fig.savefig(str(Path(dir_save).resolve() / 'visualization' / 'FOV_images_aligned_non-rigid.png'))
 
-# 4. Transform ROIs
-aligner.transform_ROIs(
-    ROIs=data.spatialFootprints, 
-    remappingIdx=aligner.remappingIdx_nonrigid,
-    # remappingIdx=aligner.remappingIdx_geo,
-    normalize=True,
-)
-
-# Ensure that the aligned images look aligned 
-roicat.helpers.save_gif(
-    array=roicat.helpers.add_text_to_images(
-        images=[((f / np.max(f)) * 255).astype(np.uint8) for f in aligner.ims_registered_geo], 
-        text=[[f"{ii}",] for ii in range(len(data.FOV_images))], 
-        font_size=3,
-        line_width=10,
-        position=(30, 90),
-    ), 
-    path=str(Path(dir_save).resolve() / 'visualization' / 'FOV_images_aligned_geometric.gif'),
-    frameRate=10,
-    loop=0,
-)
+try:
+    fig, _ = aligner.plot_alignment_results_nonrigid()
+    fig.savefig(str(Path(dir_save).resolve() / 'visualization' / 'FOV_images_aligned_non-rigid.png'))
+except Exception as e:
+        print(f"Failed to save FOV_images_aligned_non-rigid.png: {e}")
 
 roicat.helpers.save_gif(
     array=roicat.helpers.add_text_to_images(
@@ -231,6 +223,15 @@ roicat.helpers.save_gif(
     loop=0,
 )
 
+# 4. Transform ROIs
+aligner.transform_ROIs(
+    ROIs=data.spatialFootprints, 
+    remappingIdx=aligner.remappingIdx_nonrigid,
+    # remappingIdx=aligner.remappingIdx_geo,
+    normalize=True,
+)
+
+# Ensure that the aligned images look aligned 
 roicat.helpers.save_gif(
     array=roicat.helpers.add_text_to_images(
         images=[((f / np.max(f)) * 255).astype(np.uint8) for f in aligner.get_ROIsAligned_maxIntensityProjection(normalize=True)], 
@@ -321,8 +322,11 @@ sim = roicat.tracking.similarity_graph.ROI_graph(
     verbose=True,  ## Whether to print outputs
 )
 
-fig=sim.visualize_blocks()
-fig.savefig(str(Path(dir_save).resolve() / 'visualization' / 'similarity_graph.png'))
+try:
+    fig = sim.visualize_blocks()
+    fig.savefig(str(Path(dir_save).resolve() / 'visualization' / 'similarity_graph.png'))
+except Exception as e:
+        print(f"Failed to save similarity_graph.png: {e}")
 
 s_sf, s_NN, s_SWT, s_sesh = sim.compute_similarity_blockwise(
     spatialFootprints=blurrer.ROIs_blurred,  ## Mask spatial footprints
@@ -378,16 +382,22 @@ kwargs_makeConjunctiveDistanceMatrix_best = clusterer.find_optimal_parameters_fo
     seed=SEED,  ## Random seed
 )
 
-fig = clusterer.plot_distSame(kwargs_makeConjunctiveDistanceMatrix=kwargs_makeConjunctiveDistanceMatrix_best)
-fig.savefig(str(Path(dir_save).resolve() / 'visualization' / 'distance_matrix_sameClusters.png'))
+try:
+    fig = clusterer.plot_distSame(kwargs_makeConjunctiveDistanceMatrix=kwargs_makeConjunctiveDistanceMatrix_best)
+    fig.savefig(str(Path(dir_save).resolve() / 'visualization' / 'distance_matrix_sameClusters.png'))
+except Exception as e:
+        print(f"Failed to save distance_matrix_sameClusters.png: {e}")
 
-fig = clusterer.plot_similarity_relationships(
-    plots_to_show=[1,2,3], 
-    max_samples=100000,  ## Make smaller if it is running too slow
-    kwargs_scatter={'s':1, 'alpha':0.2},
-    kwargs_makeConjunctiveDistanceMatrix=kwargs_makeConjunctiveDistanceMatrix_best
-)
-fig.savefig(str(Path(dir_save).resolve() / 'visualization' / 'distance_matrix_diffClusters.png'))
+try:
+    fig, _ = clusterer.plot_similarity_relationships(
+        plots_to_show=[1,2,3], 
+        max_samples=100000,  ## Make smaller if it is running too slow
+        kwargs_scatter={'s':1, 'alpha':0.2},
+        kwargs_makeConjunctiveDistanceMatrix=kwargs_makeConjunctiveDistanceMatrix_best
+    )
+    fig.savefig(str(Path(dir_save).resolve() / 'visualization' / 'distance_matrix_diffClusters.png'))
+except Exception as e:
+        print(f"Failed to save distance_matrix_diffClusters.png: {e}")
 
 # 2. Prune the distance matrix 
 clusterer.make_pruned_similarity_graphs(
@@ -424,91 +434,98 @@ quality_metrics = clusterer.compute_quality_metrics()
 
 
 #%% Collect results 
-labels_squeezed, labels_bySession, labels_bool, labels_bool_bySession, labels_dict = roicat.tracking.clustering.make_label_variants(labels=labels, n_roi_bySession=data.n_roi)
+try:
+    labels_squeezed, labels_bySession, labels_bool, labels_bool_bySession, labels_dict = roicat.tracking.clustering.make_label_variants(labels=labels, n_roi_bySession=data.n_roi)
 
-results_clusters = {
-    'labels': labels_squeezed,
-    'labels_bySession': labels_bySession,
-    'labels_dict': labels_dict,
-    'quality_metrics': clusterer.quality_metrics if hasattr(clusterer, 'quality_metrics') else None,
-}
+    results_clusters = {
+        'labels': labels_squeezed,
+        'labels_bySession': labels_bySession,
+        'labels_dict': labels_dict,
+        'quality_metrics': clusterer.quality_metrics if hasattr(clusterer, 'quality_metrics') else None,
+    }
 
-results_all = {
-    "clusters":{
-        "labels": roicat.util.JSON_List(labels_squeezed),
-        "labels_bySession": roicat.util.JSON_List(labels_bySession),
-        "labels_bool": labels_bool,
-        "labels_bool_bySession": labels_bool_bySession,
-        "labels_dict": roicat.util.JSON_Dict(labels_dict),
-        "quality_metrics": roicat.util.JSON_Dict(clusterer.quality_metrics) if hasattr(clusterer, 'quality_metrics') else None,
-    },
-    "ROIs": {
-        "ROIs_aligned": aligner.ROIs_aligned,
-        "ROIs_raw": data.spatialFootprints,
-        "frame_height": data.FOV_height,
-        "frame_width": data.FOV_width,
-        "idx_roi_session": np.where(data.session_bool)[1],
-        "n_sessions": data.n_sessions,
-    },
-    "input_data": {
-        "paths_stat": data.paths_stat,
-        "paths_ops": data.paths_ops,
-    },
-}
+    results_all = {
+        "clusters":{
+            "labels": roicat.util.JSON_List(labels_squeezed),
+            "labels_bySession": roicat.util.JSON_List(labels_bySession),
+            "labels_bool": labels_bool,
+            "labels_bool_bySession": labels_bool_bySession,
+            "labels_dict": roicat.util.JSON_Dict(labels_dict),
+            "quality_metrics": roicat.util.JSON_Dict(clusterer.quality_metrics) if hasattr(clusterer, 'quality_metrics') else None,
+        },
+        "ROIs": {
+            "ROIs_aligned": aligner.ROIs_aligned,
+            "ROIs_raw": data.spatialFootprints,
+            "frame_height": data.FOV_height,
+            "frame_width": data.FOV_width,
+            "idx_roi_session": np.where(data.session_bool)[1],
+            "n_sessions": data.n_sessions,
+        },
+        "input_data": {
+            "paths_stat": data.paths_stat,
+            "paths_ops": data.paths_ops,
+        },
+    }
 
-run_data = {
-    'data': data.__dict__,
-    'aligner': aligner.__dict__,
-    'blurrer': blurrer.__dict__,
-    'roinet': roinet.__dict__,
-    'swt': swt.__dict__,
-    'sim': sim.__dict__,
-    'clusterer': clusterer.__dict__,
-}
+    run_data = {
+        'data': data.__dict__,
+        'aligner': aligner.__dict__,
+        'blurrer': blurrer.__dict__,
+        'roinet': roinet.__dict__,
+        'swt': swt.__dict__,
+        'sim': sim.__dict__,
+        'clusterer': clusterer.__dict__,
+    }
 
-params_used = {name: mod['params'] for name, mod in run_data.items()}
+    params_used = {name: mod['params'] for name, mod in run_data.items()}
 
-# Visualize results 
-print(f'Number of clusters: {len(np.unique(results_clusters["labels"]))}')
-print(f'Number of discarded ROIs: {(np.array(results_clusters["labels"])==-1).sum()}')
+    # Visualize results 
+    print(f'Number of clusters: {len(np.unique(results_clusters["labels"]))}')
+    print(f'Number of discarded ROIs: {(np.array(results_clusters["labels"])==-1).sum()}')
 
-# Plot quality metrics 
-fig, _ = roicat.tracking.clustering.plot_quality_metrics(quality_metrics=quality_metrics, labels=labels_squeezed, n_sessions=data.n_sessions);
-fig.savefig(str(Path(dir_save).resolve() / 'visualization' / 'quality_metrics.png'))
+    # Plot quality metrics 
+    try:
+        fig, _ = roicat.tracking.clustering.plot_quality_metrics(quality_metrics=quality_metrics, labels=labels_squeezed, n_sessions=data.n_sessions);
+        fig.savefig(str(Path(dir_save).resolve() / 'visualization' / 'quality_metrics.png'))
+    except Exception as e:
+            print(f"Failed to save quality_metrics.png: {e}")
 
-# Color visualisation of the results 
-FOV_clusters = roicat.visualization.compute_colored_FOV(
-    spatialFootprints=[r.power(1.0) for r in results_all['ROIs']['ROIs_aligned']],  ## Spatial footprint sparse arrays
-    FOV_height=results_all['ROIs']['frame_height'],
-    FOV_width=results_all['ROIs']['frame_width'],
-    labels=results_all["clusters"]["labels_bySession"],  ## cluster labels
-)
+    # Color visualisation of the results 
+    FOV_clusters = roicat.visualization.compute_colored_FOV(
+        spatialFootprints=[r.power(1.0) for r in results_all['ROIs']['ROIs_aligned']],  ## Spatial footprint sparse arrays
+        FOV_height=results_all['ROIs']['frame_height'],
+        FOV_width=results_all['ROIs']['frame_width'],
+        labels=results_all["clusters"]["labels_bySession"],  ## cluster labels
+    )
 
-roicat.helpers.save_gif(
-    array=roicat.helpers.add_text_to_images(
-        images=[((f / np.max(f)) * 255).astype(np.uint8) for f in FOV_clusters], 
-        text=[[f"{ii}",] for ii in range(len(FOV_clusters))], 
-        font_size=3,
-        line_width=10,
-        position=(30, 90),
-    ), 
-    path=str(Path(dir_save).resolve() / 'visualization' / 'FOV_clusters.gif'),
-    frameRate=10,
-    loop=0,
-)
+    roicat.helpers.save_gif(
+        array=roicat.helpers.add_text_to_images(
+            images=[((f / np.max(f)) * 255).astype(np.uint8) for f in FOV_clusters], 
+            text=[[f"{ii}",] for ii in range(len(FOV_clusters))], 
+            font_size=3,
+            line_width=10,
+            position=(30, 90),
+        ), 
+        path=str(Path(dir_save).resolve() / 'visualization' / 'FOV_clusters.gif'),
+        frameRate=10,
+        loop=0,
+    )
 
-# Save results
-paths_save = {
-    'results_clusters': str(Path(dir_save) / f'{animal}.tracking.results_clusters.json'),
-    'params_used':      str(Path(dir_save) / f'{animal}.tracking.params_used.json'),
-    'results_all':      str(Path(dir_save) / f'{animal}.tracking.results_all.richfile'),
-    'run_data':         str(Path(dir_save) / f'{animal}.tracking.run_data.richfile'),
-}
+    # Save results
+    paths_save = {
+        'results_clusters': str(Path(dir_save) / f'{animal}.tracking.results_clusters.json'),
+        'params_used':      str(Path(dir_save) / f'{animal}.tracking.params_used.json'),
+        'results_all':      str(Path(dir_save) / f'{animal}.tracking.results_all.richfile'),
+        'run_data':         str(Path(dir_save) / f'{animal}.tracking.run_data.richfile'),
+    }
 
-Path(dir_save).mkdir(parents=True, exist_ok=True)
+    Path(dir_save).mkdir(parents=True, exist_ok=True)
 
-roicat.helpers.json_save(obj=results_clusters, filepath=paths_save['results_clusters'])
-roicat.helpers.json_save(obj=params_used, filepath=paths_save['params_used'])
-roicat.util.RichFile_ROICaT(path=paths_save['results_all']).save(obj=results_all, overwrite=True)
-roicat.util.RichFile_ROICaT(path=paths_save['run_data']).save(obj=run_data, overwrite=True)
+    roicat.helpers.json_save(obj=results_clusters, filepath=paths_save['results_clusters'])
+    roicat.helpers.json_save(obj=params_used, filepath=paths_save['params_used'])
+    roicat.util.RichFile_ROICaT(path=paths_save['results_all']).save(obj=results_all, overwrite=True)
+    roicat.util.RichFile_ROICaT(path=paths_save['run_data']).save(obj=run_data, overwrite=True)
+
+except Exception as e:
+    print(f"Failed to save results: {e}")
 

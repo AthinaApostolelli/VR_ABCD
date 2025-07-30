@@ -10,7 +10,6 @@ sessions = ['TAA0000066/ses-023_date-20250516_protocol-t17']
 
 for session in sessions: 
     print(f"Processing session: {session}")
-
     # Read in mask data from cellpose
     cellpose_fpath = "/ceph/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2/" + session + "/funcimg/Session/suite2p/plane0/meanImg_seg.npy"
     cellpose_masks = np.load(cellpose_fpath, allow_pickle=True).item()
