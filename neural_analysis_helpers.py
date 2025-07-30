@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import to_rgba
 import os, re
 import scipy.stats as stats
-from scipy.ndimage import gaussian_filter1d, percentile_filter
+from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 import pandas as pd
 import yaml
@@ -11,53 +11,6 @@ import math
 from math import log10, floor
 import itertools
 import seaborn as sns
-
-
-def compute_deltaF_F0(basepath, animal, session, valid_frames, reload=False, method='Sandra', funcimg_frame_rate=45):
-    DF_F_file = os.path.join(basepath, animal, session, 'funcimg/Session/suite2p/plane0/DF_F0.npy')
-
-    if os.path.exists(DF_F_file) and reload is False:
-        print('DF_F0 file found. Loading...')
-        
-        DF_F_all = np.load(DF_F_file)
-        DF_F = DF_F_all[:, valid_frames]
-        print(DF_F.shape)
-        
-    else:
-        reload = True
-        F = np.load(os.path.join(basepath, animal, session, 'funcimg/Session/suite2p/plane0/F.npy'))
-        Fneu = np.load(os.path.join(basepath, animal, session, 'funcimg/Session/suite2p/plane0/Fneu.npy'))
-
-        # Load suite2p labels and filter valid neurons
-        iscell = np.load(os.path.join(basepath, animal, session, 'funcimg/Session/suite2p/plane0/iscell.npy'))[:,0]
-        neurons = np.where(iscell == 1)[0] 
-
-        # Calculate deltaF/F0
-        if method == 'Sandra':
-            # Option 1 - Sandra: using moving percentile for F0 (https://www.nature.com/articles/s41586-021-03452-z#Sec7)
-            # F0 is defined as the 25th percentile of the fluorescence trace in a sliding window of 60 s
-            # The average green fluorescence signal was extracted for each cell and then corrected for neuropil contamination 
-            # by subtracting the signal of 30 μm surrounding each cell multiplied by 0.7 and adding the median multiplied by 0.7
-
-            Fcorr = F - 0.7 * Fneu + 0.7 * np.median(Fneu, axis=1).reshape(-1,1)
-
-            F0 = np.zeros(np.shape(F))
-            f0_window = 60 * funcimg_frame_rate  # frames
-            for n in neurons:  # Loop over neurons (rows)
-                F0[n, :] = percentile_filter(F[n, :], percentile=25, size=f0_window, mode='nearest')
-
-            DF_F_all = (Fcorr - F0) / F0  # Compute DF/F as (F-F0)/F0 per frame per neuron
-
-            # Select the correct frames that fall within VR behaviour 
-            DF_F = DF_F_all[:, valid_frames]
-
-            for n in neurons[0:10]:
-                plt.figure()
-                plt.plot(F[n,0:2000], label='F')
-                plt.plot(Fcorr[n,0:2000], label='Fcorr')
-                plt.plot(F0[n,0:2000], label='F0')
-                plt.plot(DF_F[n,0:2000], label='DF/F0')
-                plt.legend()
 
 
 def get_psth(data, neurons, event_idx, time_around=(-1, 3), funcimg_frame_rate=45):
