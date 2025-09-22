@@ -4,14 +4,20 @@ from matplotlib.colors import to_rgba
 import os, re
 import scipy.stats as stats
 from scipy.ndimage import gaussian_filter1d
-from scipy.signal import find_peaks
+from scipy.signal import find_peaks, resample
 import pandas as pd
 import yaml
 import math
 from math import log10, floor
 import itertools
 import seaborn as sns
+import importlib
 
+import parse_session_functions
+import cellTV_functions as cellTV
+
+importlib.reload(parse_session_functions)
+importlib.reload(cellTV)
 
 def get_psth(data, neurons, event_idx, time_around=(-1, 3), funcimg_frame_rate=45):
     num_neurons = len(neurons)
@@ -183,22 +189,44 @@ def split_psth(psth, event_idx, event='reward', zscoring=True, time_around=1, fu
 
 
 def get_tuned_neurons(psth, event='reward', time_around=1, funcimg_frame_rate=45, plot_neurons=True):
-    # Statistics to find neurons tuned to an event e.g. reward, lick, landmark entry etc.
+    """
+    Mann–Whitney U test comparing firing before and after event.
+    
+    Parameters
+    ----------
+    psth : array, shape (neurons, trials, timebins)
+    event : str
+        Event name
+    time_around : int/float or tuple
+        If int/float: window in seconds, symmetric around 0 (e.g. 1 → -1 to +1).
+        If tuple: (start, end) in seconds (e.g. (-1, 2)).
+    funcimg_frame_rate : int
+        Imaging frame rate (Hz).
+    plot_neurons : bool
+        Whether to plot significant neurons.
+    """
     # TODO: bootstrapping / permutation test instead? 
 
-    # Mann–Whitney U test comparing the period just before stimulus onset to the period directly after stimulus onset. 
-
-    if isinstance(time_around, int):
-        time_window = time_around * funcimg_frame_rate
+    # Handle time window
+    if isinstance(time_around, (int, float)):
+        start_time = -time_around
+        end_time = time_around
+    elif isinstance(time_around, (tuple, list)) and len(time_around) == 2:
+        start_time, end_time = time_around
     else:
-        time_window = int(np.floor(time_around * funcimg_frame_rate))
+        raise ValueError("time_around must be a number or a tuple/list (start, end)")
 
-    num_timebins = psth.shape[2]
+    start_frames = int(np.floor(start_time * funcimg_frame_rate))
+    end_frames = int(np.ceil(end_time * funcimg_frame_rate))
     num_neurons = psth.shape[0]
 
+    event_frame = -start_frames  # event aligned at t=0
+    before_idx = slice(0, event_frame)          # frames before event
+    after_idx  = slice(event_frame, event_frame + end_frames)  # frames after event
+
     # Average across timebins for each trial
-    before_event_firing = np.mean(psth[:, :, 0:time_window], axis=2)
-    after_event_firing = np.mean(psth[:, :, time_window:], axis=2)
+    before_event_firing = np.mean(psth[:, :, before_idx], axis=2)
+    after_event_firing  = np.mean(psth[:, :, after_idx], axis=2)
     # print(before_event_firing.shape, after_event_firing.shape)
 
     # Perform the test using all trials for each neuron
@@ -213,8 +241,8 @@ def get_tuned_neurons(psth, event='reward', time_around=1, funcimg_frame_rate=45
 
     # 2. peak in the 1s after event > mean + 2*std of the 1s before the event
     average_psth = np.mean(psth, axis=1)
-    before_event_avg_firing = average_psth[:, 0:time_window]
-    after_event_avg_firing = average_psth[:, time_window:]
+    before_event_avg_firing = average_psth[:, before_idx]
+    after_event_avg_firing = average_psth[:, after_idx]
     criterion2 = np.where(np.max(after_event_avg_firing, axis=1) > (np.mean(before_event_avg_firing, axis=1) + 2 * np.std(before_event_avg_firing, axis=1)))[0]
 
     tuned_neurons = np.intersect1d(criterion1, criterion2)
@@ -225,14 +253,12 @@ def get_tuned_neurons(psth, event='reward', time_around=1, funcimg_frame_rate=45
         for n in tuned_neurons[0:10]:
             fig, ax = plt.subplots(1, 1, figsize=(2,2), sharey=True)
             ax.plot(average_psth[n, :])      
-            ax.axvspan(num_timebins/2, num_timebins, color='gray', alpha=0.5)
+            event_frame = -start_frames  
+            ax.plot(average_psth[n, :])      
+            ax.axvspan(event_frame, event_frame + end_frames, color='gray', alpha=0.5)
             ax.set_xlabel('Time')
-            ax.set_xticks([-0.5, num_timebins/2-0.5, num_timebins-0.5])
-            if time_around == int(time_around):
-                xticklabels = [int(-time_around), 0, int(time_around)]
-            else:
-                xticklabels = [round(-time_around, 1), 0, round(time_around, 1)]
-            ax.set_xticklabels(xticklabels)
+            ax.set_xticks([event_frame + start_frames, event_frame, event_frame + end_frames])
+            ax.set_xticklabels([start_time, 0, end_time])
             ax.spines[['right', 'top']].set_visible(False)
             ax.set_ylabel('DF/F')
 
@@ -445,26 +471,35 @@ def plot_avg_goal_psth(neurons, event_idxs, psths, average_psths, \
 def get_landmark_psth(data, neurons, event_idx, num_landmarks=10, time_around=1, funcimg_frame_rate=45):
     '''This function is similar to get_psth, but the average PSTH is calculated for each landmark separately.'''
 
-    if isinstance(time_around, int):
-        time_window = time_around * funcimg_frame_rate
+    # Handle time window
+    if isinstance(time_around, (int, float)):
+        start_time = -time_around
+        end_time = time_around
+    elif isinstance(time_around, (tuple, list)) and len(time_around) == 2:
+        start_time, end_time = time_around
     else:
-        time_window = int(np.floor(time_around * funcimg_frame_rate))
-
+        raise ValueError("time_around must be a number or a tuple/list (start, end)")
+    
+    # Convert to frames
+    start_frames = int(np.floor(start_time * funcimg_frame_rate))
+    end_frames = int(np.ceil(end_time * funcimg_frame_rate))
+    window = np.arange(start_frames, end_frames)
+    num_timebins = len(window)
+    
+    # Handle neurons input
     if isinstance(neurons, int) or np.isscalar(neurons):
         neurons = [neurons]
-
-    num_timebins = 2*time_window
     num_neurons = len(neurons)
-    num_events = len(event_idx)
 
-    window_indices = np.add.outer(event_idx, np.arange(-time_window, time_window)).astype(int)  
+    # Build window indices (events × timebins)
+    window_indices = np.add.outer(event_idx, window).astype(int)  
 
     # Remove last events if close to session end 
     valid_mask = window_indices[:, -1] < data.shape[1]
     valid_window_indices = window_indices[valid_mask]
+    num_events = valid_window_indices.shape[0]
 
     # Preallocate PSTH array
-    num_events = valid_window_indices.shape[0]
     psth = np.zeros((num_neurons, num_events, num_timebins))
     for n, neuron in enumerate(neurons):
         psth[n, :, :] = data[neuron, valid_window_indices]
@@ -509,55 +544,48 @@ def get_landmark_id_psth(data, neurons, event_idx, session, num_landmarks=2, tim
 
 
 def plot_avg_landmark_psth(neurons, psth, average_psth, num_landmarks=10, time_around=1, funcimg_frame_rate=45, \
-                           plot_all_neurons=False, save_plot=False, savepath='', savedir=''):
+                           plot_all_neurons=False, plot_trials=False, save_plot=False, savepath='', savedir=''):
     
-    time_window = time_around * funcimg_frame_rate # frames
-    num_timebins = 2*time_window
-
-    if plot_all_neurons:
-        for n, neuron in enumerate(neurons):
-
-            fig, ax = plt.subplots(1, 10, figsize=(15, 2), sharey=True, sharex=True)
-            ax = ax.ravel()
-
-            for i in range(num_landmarks):
-                ax[i].plot(psth[n, i::num_landmarks, :].T, alpha=0.5)  
-                ax[i].plot(average_psth[n, i, :], 'k', linewidth=3)
-                ax[i].axvspan(num_timebins/2, num_timebins, color='gray', alpha=0.5)
-                ax[i].set_xlabel('Time')
-                ax[i].set_xticks([-0.5, num_timebins/2-0.5, num_timebins-0.5])
-                ax[i].set_xticklabels([int(-time_around), 0, int(time_around)])
-                ax[i].spines[['right', 'top']].set_visible(False)
-
-            ax[0].set_ylabel('DF/F')
-            plt.tight_layout()
-            plt.suptitle(f'Neuron {neuron}')
-        
-            if save_plot:
-                output_path = os.path.join(savepath, savedir)
-                if not os.path.exists(output_path):
-                    os.makedirs(output_path)
-                plt.savefig(os.path.join(output_path, f'neuron{neuron}.png'))
-                plt.close()
-
+    # Handle time window properly
+    if isinstance(time_around, (int, float)):
+        start_time = -time_around
+        end_time = time_around
+    elif isinstance(time_around, (tuple, list)) and len(time_around) == 2:
+        start_time, end_time = time_around
     else:
-        for n, neuron in enumerate(neurons[0:10]):
+        raise ValueError("time_around must be a number or a (start, end) tuple/list")
 
-            fig, ax = plt.subplots(1, 10, figsize=(15, 2), sharey=True, sharex=True)
-            ax = ax.ravel()
+    start_frames = int(np.floor(start_time * funcimg_frame_rate))
+    end_frames = int(np.ceil(end_time * funcimg_frame_rate))
+    num_timebins = end_frames - start_frames
 
-            for i in range(num_landmarks):
-                ax[i].plot(psth[n, i::num_landmarks, :].T)  # TODO: confirm indices
-                ax[i].plot(average_psth[n, i, :], 'k', linewidth=3)
-                ax[i].axvspan(num_timebins/2, num_timebins, color='gray', alpha=0.5)
-                ax[i].set_xlabel('Time')
-                ax[i].set_xticks([-0.5, num_timebins/2-0.5, num_timebins-0.5])
-                ax[i].set_xticklabels([int(-time_around), 0, int(time_around)])
-                ax[i].spines[['right', 'top']].set_visible(False)
+    # Choose how many neurons to plot 
+    neurons_to_plot = neurons if plot_all_neurons else neurons[:10]
 
-            ax[0].set_ylabel('DF/F')
-            plt.tight_layout()
-            plt.suptitle(f'Neuron {neuron}')
+    for n, neuron in enumerate(neurons_to_plot):   # neuron idx in psth array, not neuron id
+        fig, ax = plt.subplots(1, 10, figsize=(15, 2), sharey=True, sharex=True)
+        ax = ax.ravel()
+
+        for i in range(num_landmarks):
+            if plot_trials:
+                ax[i].plot(psth[neuron, i::num_landmarks, :].T, alpha=0.5)  
+            ax[i].plot(average_psth[neuron, i, :], 'k', linewidth=3)
+            ax[i].axvspan(-start_frames, -start_frames + end_frames, color='gray', alpha=0.5)
+            ax[i].set_xlabel('Time')
+            ax[i].set_xticks([0, -start_frames, num_timebins])
+            ax[i].set_xticklabels([start_time, 0, end_time])
+            ax[i].spines[['right', 'top']].set_visible(False)
+
+        ax[0].set_ylabel('DF/F')
+        plt.tight_layout()
+        plt.suptitle(f'Neuron {neuron}')
+    
+        if save_plot:
+            output_path = os.path.join(savepath, savedir)
+            if not os.path.exists(output_path):
+                os.makedirs(output_path)
+            plt.savefig(os.path.join(output_path, f'neuron{neuron}.png'))
+            plt.close()
 
 
 def plot_landmark_psth_map(average_psth, session, zscoring=True, sorting_lm=0, num_landmarks=10, time_around=1, funcimg_frame_rate=45, save_plot=False, savepath='', savedir='', filename=''):
@@ -1403,7 +1431,499 @@ def get_map_correlation_matrix(all_average_psths, conditions, population=False, 
     return correlation_matrix
 
 
+def get_glm_residuals(x, y, plot=True, conditions = ['reward', 'test']):
+    # Fit a GLM of the format y = f(x, beta) + noise
+    import statsmodels.api as sm
+    
+    glm_residuals = []
+
+    for i in range(len(y)):
+        endog_flat = np.array(y[i]).flatten() # y variable
+        exog_flat = np.array(x[i]).flatten() # x variable
+
+        mask = ~np.isnan(exog_flat) & ~np.isnan(endog_flat)
+        exog = exog_flat[mask]
+        endog = endog_flat[mask]
+
+        X = sm.add_constant(exog)  # Adds a column of ones
+
+        # Fit the model
+        model = sm.OLS(endog, X).fit()
+
+        print(model.summary())
+
+        # Get residuals
+        residuals = np.full_like(exog_flat, np.nan, dtype=np.float64)
+        residuals[mask] = model.resid
+        residuals_2d = residuals.reshape(np.array(x[i]).shape)
+
+        glm_residuals.append(residuals_2d)
+
+    
+    if plot:
+        condition_pairs = list(itertools.combinations(range(len(conditions)), 2))
+        
+        # Individual colormaps
+        fig, ax = plt.subplots(1, len(glm_residuals), figsize=(12,4), sharex=True, sharey=True)
+        ax = ax.ravel()
+
+        for i, sim_matrix in enumerate(glm_residuals):
+            vmax = np.round(np.nanmax(sim_matrix), 2)
+            if vmax < 1e-3:
+                vmax = 1e-3
+            vmin = -vmax
+            im = ax[i].imshow(sim_matrix, vmin=vmin, vmax=vmax, cmap='bwr', origin='lower')
+            
+            cb = fig.colorbar(im, ax=ax[i], shrink=0.8, ticks=[vmin, vmax])  
+            cb.set_label('Correlation (r)', labelpad=-5)
+
+            if i < len(conditions):
+                ax[i].set_title(f"{conditions[i]} vs {conditions[i]}")
+            else:
+                ax[i].set_title(f"{conditions[int(condition_pairs[0][0])]} vs {conditions[int(condition_pairs[0][1])]}")
+            ax[i].set_xlabel("Lap block")
+            ax[i].set_ylabel("Lap block")
+        plt.tight_layout()
+
+        # Global colormap
+        all_values = np.concatenate([sim[~np.isnan(sim)].flatten() for sim in glm_residuals])
+        vmax = np.round(np.max(all_values), 2)
+        vmin = -vmax
+
+        fig, ax = plt.subplots(1, len(glm_residuals), figsize=(12,4), sharex=True, sharey=True)
+        ax = ax.ravel()
+
+        for i, sim_matrix in enumerate(glm_residuals):
+            im = ax[i].imshow(sim_matrix, vmin=vmin, vmax=vmax, cmap='bwr', origin='lower')
+
+            if i < len(conditions):
+                ax[i].set_title(f"{conditions[i]} vs {conditions[i]}")
+            else:
+                ax[i].set_title(f"{conditions[int(condition_pairs[0][0])]} vs {conditions[int(condition_pairs[0][1])]}")
+            ax[i].set_xlabel("Lap block")
+            ax[i].set_ylabel("Lap block")
+        # plt.tight_layout()
+        fig.colorbar(im, ax=ax.ravel().tolist(), shrink=0.8, label='Correlation (r)', ticks=[vmin, vmax])
+
+    return glm_residuals
+
+
+def get_lm_firing(dF, cell, session, lm_entry_idx=None, lm_exit_idx=None, bins=90, shuffle=False):
+
+    # Get landmark entry and exit idx 
+    if lm_entry_idx is None and lm_exit_idx is None:
+        lm_entry_idx, lm_exit_idx = get_lm_entry_exit(session)
+
+    # Create landmark vector TODO: remove? 
+    num_landmarks = session['num_landmarks']
+    lm_vec = np.arange(num_landmarks)
+    lm_vec = np.tile(lm_vec, len(session['all_landmarks'])//num_landmarks)
+    num_lms_considered = len(lm_vec)
+
+    # Get firing rate per landmark 
+    binned_firing = np.zeros((num_lms_considered, bins))
+    for i, (entry, exit) in enumerate(zip(lm_entry_idx[:num_lms_considered], lm_exit_idx[:num_lms_considered])):
+        if shuffle: 
+                # Generate null distribution with circular shifts.
+                shift = np.random.randint(len(dF[cell]))
+                dF_shuffled = np.roll(dF[cell], shift)
+                lm_firing = dF_shuffled[entry:exit]
+        else:
+                lm_firing = dF[cell, entry:exit]
+
+        binned_firing[i], _, _ = stats.binned_statistic(np.arange(0, len(lm_firing)), lm_firing, bins=bins)
+        if np.isnan(binned_firing[i]).any():
+            print(f"NaNs found! Lap {i}, entry={entry}, exit={exit}. Consider reducing the number of bins.")
+
+    # Get mean firing rate per landmark 
+    mean_firing = np.nanmean(binned_firing, axis=1)
+
+    # Get firing rate per landmark id
+    binned_lm_firing = np.zeros((num_landmarks, bins))
+    for k in range(num_landmarks):
+        binned_lm_firing[k] = np.nanmean(binned_firing[k::num_landmarks], axis=0)
+
+    # Get mean firing rate per landmark id - regressor
+    mean_lm_firing = np.mean(binned_lm_firing, axis=1)
+
+    return mean_firing, binned_firing, mean_lm_firing, binned_lm_firing
+
+
+def get_high_lm_firing_cells(dF, lm_tunings, session, goal_lms, test_lm, bins=90, 
+                             stage=None, lm_entry_idx=None, lm_exit_idx=None, plot=True,
+                             saveplot=True, figpath='test_lm_cells'):
+    mean_goal_lm_firing = {}
+    mean_test_lm_firing = {}
+    mean_firing = {}
+    binned_firing = {}
+    binned_lm_firing = {}
+    wilcoxon_stat = np.zeros((len(lm_tunings)))
+    wilcoxon_pval = np.zeros((len(lm_tunings)))
+
+    for c, cell in enumerate(lm_tunings):
+        mean_firing[cell], binned_firing[cell], _, binned_lm_firing[cell] = get_lm_firing(dF, cell, session, lm_entry_idx=lm_entry_idx, lm_exit_idx=lm_exit_idx, bins=bins, shuffle=False)
+
+        # Gather mean firing for all goal landmarks
+        arrs = [mean_firing[cell][i::session['num_landmarks']] for i in goal_lms]
+        stacked = np.stack(arrs, axis=1)   # shape (n_rows, n_goal_lms)
+        mean_goal_lm_firing[cell] = stacked.mean(axis=1)
+
+        # Gather mean firing for all goal landmarks
+        mean_test_lm_firing[cell] = np.concatenate([mean_firing[cell][test_lm::session['num_landmarks']]])
+
+        # Perform Wilcoxon test on test vs goal
+        wilcoxon_stat[c], wilcoxon_pval[c] = stats.wilcoxon(mean_goal_lm_firing[cell], mean_test_lm_firing[cell]) 
+
+    # Find cells with higher test vs goal firing and plot binned firing rate per landmark per lap and polar plot of fiirng rate per lm. 
+    high_lm_cells = []
+    for c, cell in enumerate(lm_tunings):
+        # Criterion 1: p-value < 0.05
+        if wilcoxon_pval[c] < 0.05:
+
+            # Criterion 2: max test firing > max goal firing
+            goal_arr = [binned_lm_firing[cell][i::session['num_landmarks'], :] for i in goal_lms]
+            goal_arr = np.stack(goal_arr, axis=1).flatten()
+            test_arr = binned_lm_firing[cell][test_lm::session['num_landmarks'], :].flatten()
+
+            if np.max(test_arr) > np.max(goal_arr):
+                
+                high_lm_cells.append(cell)
+
+                if plot:
+                    # Format data for plotting
+                    arrs = [binned_firing[cell][i::session['num_landmarks'], :] for i in goal_lms]
+                    binned_goal_firing = np.stack(arrs, axis=1)   # shape (n_rows, n_goal_lms, n_cols)
+                    binned_test_firing = binned_firing[cell][test_lm::session['num_landmarks'], :]
+                    
+                    combined_rows = np.concatenate([binned_goal_firing, binned_test_firing[:, None, :]], axis=1)  # axis1 = landmarks
+                    plot_data = combined_rows.reshape(binned_goal_firing.shape[0], -1)
+
+                    # Plot
+                    fig = plt.figure(figsize=(10, 4))
+                    ax0 = fig.add_subplot(121)
+                    
+                    im = ax0.imshow(plot_data, aspect='auto', cmap='viridis')
+                    fig.colorbar(im, ax=ax0, label='Firing rate (Hz)')
+
+                    cols_per_lm = binned_firing[cell].shape[1]  # number of bins per landmark
+                    for i in range(1, len(goal_lms) + 1):
+                        ax0.axvline(i*cols_per_lm, color='white', linestyle='--', lw=0.5)  # reward LMs
+
+                    tick_positions = np.arange(len(goal_lms) + 1) * cols_per_lm + cols_per_lm/2
+                    if test_lm == 9:
+                        tick_labels = ['A', 'B', 'C', 'D', 'Test']
+                    elif test_lm == 8:
+                        tick_labels = ['1', '3', '5', '7', '9']
+                    ax0.set_xticks(tick_positions, tick_labels, fontsize=10)
+                    ax0.set_xlabel('Landmarks')
+                    ax0.set_yticks([0, binned_goal_firing.shape[0]-1])
+                    ax0.set_ylabel('Lap')
+                    ax0.set_title(f'Cell {cell}, p-value {np.round(wilcoxon_pval[c], 2)}')
+
+                    # Polar subplot
+                    data = binned_lm_firing[cell].flatten()
+                    if stage == 5:
+                        color = 'blue'
+                    elif stage == 6:
+                        color = 'orange'
+                    elif stage == 8:
+                        color = 'red'
+                    else:
+                        color = 'blue'
+                    ax1 = fig.add_subplot(122, projection='polar')
+                    ax1.set_theta_zero_location('N')
+                    ax1.set_theta_direction(-1)
+                    angles = np.linspace(0, 2 * np.pi, binned_lm_firing[cell].shape[1] * session['num_landmarks'], endpoint=False)
+                    # add the first angle to close the circle
+                    angles = np.concatenate((angles, [angles[0]]))
+                    avg_bin = np.concatenate((data, [data[0]]))
+                    # sem_bin = np.concatenate((sem_bin, [sem_bin[0]]))
+                    ax1.plot(angles, avg_bin, color=color, linewidth=2)
+                    # ax1.fill_between(angles, avg_bin - sem_bin, avg_bin + sem_bin, color='blue', alpha=0.2)
+                    #label the cardinal directions
+                    ax1.set_xticks(np.linspace(0, 2 * np.pi, session['num_landmarks'], endpoint=False))
+                    ax1.set_xticklabels(np.arange(1,11))
+                    ax1.set_title(f'Cell {cell} - Average Firing Rate (Polar)')
+
+                    if saveplot is True:
+                        plt.savefig(figpath / f'cell{cell}.png')
+                    plt.show()
+    
+    return high_lm_cells
+
+
+def get_test_peak_tuned_cells(dF, goal_firing, event_idx, session_idx, neurons, bins,
+                         rew_goals, test_goal, session, save_path, plot=True, add_lick_rate=False):
+    """
+    Find neurons with strong test-goal tuning using multiple criteria.
+    - rew_goals: list of goal indices considered as "reward"
+    - test_goal: index of the goal to test against
+    """
+
+    test_goal_cells = []
+
+    wilcoxon_stat = np.zeros(len(neurons))
+    wilcoxon_pval = np.zeros(len(neurons))
+
+    templates, peaks = create_templates(peaks=[1, 4, 5], bins=360, plot=False)
+
+    for c, cell in enumerate(neurons):
+
+        # Split data by goal
+        goal_data = [
+            goal_firing[cell][:, bins*i:bins*(i+1)]
+            for i in range(len(rew_goals) + 1)  # total goals
+        ]
+
+        rew_data = np.hstack([goal_data[i] for i in rew_goals])  # concat reward goals
+        test_data = goal_data[test_goal]
+
+        # Mean activity per lap
+        mean_rew_data = np.mean(rew_data, axis=1)
+        mean_test_data = np.mean(test_data, axis=1)
+
+        # Mean activity per bin
+        mean_bin_rew_data = np.mean(rew_data, axis=0)
+        mean_bin_test_data = np.mean(test_data, axis=0)
+
+        # Condition 1: Wilcoxon test (test > rew)
+        wilcoxon_stat[c], wilcoxon_pval[c] = stats.wilcoxon(mean_rew_data, mean_test_data, alternative='less')
+
+        if wilcoxon_pval[c] < 0.05:
+            # Condition 2: test firing stronger than rew
+            if np.max(mean_bin_test_data) > np.max(mean_bin_rew_data):
+
+                # Condition 3: high tuning score
+                tuning_scores = []
+                avg_goal_firing = np.mean(goal_firing[cell], axis=0)
+                for i in np.sort(np.concatenate([rew_goals, [test_goal]])):
+                    state = avg_goal_firing[bins*i:bins*(i+1)]
+                    state_max, state_min, state_mean = np.max(state), np.min(state), np.mean(state)
+                    tuning_scores.append((state_max - state_min) / state_mean)
+
+                if tuning_scores[test_goal] > 1.2 and (
+                    tuning_scores[test_goal] > np.median([tuning_scores[i] for i in rew_goals]) + 0.2
+                ):
+                    # Condition 4: highest correlation with single-peak template
+                    avg_binned_data = np.mean(goal_firing[cell], axis=0)
+                    n_cell_peaks, _ = get_template_ccg(cell, avg_binned_data, templates, peaks, plot=False)
+
+                    if n_cell_peaks == 1:
+                        test_goal_cells.append(cell)
+
+                        if plot:
+                            if add_lick_rate:
+                                dF_lick = np.array(session['frame_lick_rate']).reshape(1, -1)
+
+                                cellTV.plot_arb_progress_2cells(dF=[dF, dF_lick], cell=[cell, 0], event_frames=[event_idx, event_idx], 
+                                                                ngoals=len(rew_goals)+1, bins=bins, 
+                                                                stages=[session_idx, session_idx], labels=[f'cell {cell}', 'lick rate'], 
+                                                                plot=True, shuffle=False)
+                            else:
+                                plot_arb_progress(dF, cell, event_idx, len(rew_goals) + 1, bins, session_idx, ax=None)
+                            
+    if save_path is not None:
+        np.savez(save_path, high_test_goal_cells=test_goal_cells)
+
+    return test_goal_cells
+
+
+def get_high_peak_tuned_cells(dF, goal_firing, event_idx, session_idx, neurons, bins,
+                         rew_goals, test_goal, session, save_path, plot=True, add_lick_rate=False):
+    """
+    Find neurons with stronger test-goal than rew-goal tuning using multiple criteria.
+    - rew_goals: list of goal indices considered as "reward"
+    - test_goal: index of the goal to test against
+    """
+
+    high_test_goal_cells = []
+
+    wilcoxon_stat = np.zeros(len(neurons))
+    wilcoxon_pval = np.zeros(len(neurons))
+
+    templates, peaks = create_templates(peaks=[4, 5], bins=360, plot=False)
+
+    for c, cell in enumerate(neurons):
+
+        # Split data by goal
+        goal_data = [
+            goal_firing[cell][:, bins*i:bins*(i+1)]
+            for i in range(len(rew_goals) + 1)  # total goals
+        ]
+
+        rew_data = np.hstack([goal_data[i] for i in rew_goals])  # concat reward goals
+        test_data = goal_data[test_goal]
+
+        # Mean activity per lap
+        mean_rew_data = np.mean(rew_data, axis=1)
+        mean_test_data = np.mean(test_data, axis=1)
+
+        # Mean activity per bin
+        mean_bin_rew_data = np.mean(rew_data, axis=0)
+        mean_bin_test_data = np.mean(test_data, axis=0)
+
+        # Condition 1: Wilcoxon test (test > rew)
+        wilcoxon_stat[c], wilcoxon_pval[c] = stats.wilcoxon(mean_rew_data, mean_test_data, alternative='less')
+
+        if wilcoxon_pval[c] < 0.05:
+            # Condition 2: test firing stronger than rew
+            if np.max(mean_bin_test_data) > np.max(mean_bin_rew_data):
+
+                # Condition 3: high tuning score
+                tuning_scores = []
+                avg_goal_firing = np.mean(goal_firing[cell], axis=0)
+                for i in np.sort(np.concatenate([rew_goals, [test_goal]])):
+                    state = avg_goal_firing[bins*i:bins*(i+1)]
+                    state_max, state_min, state_mean = np.max(state), np.min(state), np.mean(state)
+                    tuning_scores.append((state_max - state_min) / state_mean)
+
+                if tuning_scores[test_goal] > 1.2 and (
+                    tuning_scores[test_goal] > np.median([tuning_scores[i] for i in rew_goals]) + 0.2
+                ):
+                    high_test_goal_cells.append(cell)
+
+                avg_binned_data = np.mean(goal_firing[cell], axis=0)
+                n_cell_peaks, _ = get_template_ccg(cell, avg_binned_data, templates, peaks, plot=False)
+
+                if n_cell_peaks == 5:
+                    # test_goal_cells.append(cell)
+                    high_test_goal_cells.append(cell)
+
+                    if plot:
+                        if add_lick_rate:
+                            dF_lick = np.array(session['frame_lick_rate']).reshape(1, -1)
+
+                            cellTV.plot_arb_progress_2cells(dF=[dF, dF_lick], cell=[cell, 0], event_frames=[event_idx, event_idx], 
+                                                            ngoals=len(rew_goals)+1, bins=bins, 
+                                                            stages=[session_idx, session_idx], labels=[f'cell {cell}', 'lick rate'], 
+                                                            plot=True, shuffle=False)
+                        else:
+                            plot_arb_progress(dF, cell, event_idx, len(rew_goals) + 1, bins, session_idx, ax=None)
+
+    if save_path is not None:                         
+        np.savez(save_path, high_test_goal_cells=high_test_goal_cells)
+
+    return high_test_goal_cells
+
+
+def plot_arb_progress(dF, cell, event_frames, ngoals, bins, stage, labels=None, ax=None):
+    """
+    Extract the progress tuning between arbitrary events.
+    If ax1/ax2 are given, plot into them. Otherwise, create a new figure.
+    """
+    dF_cell = cellTV.extract_cell_trace(dF, cell, plot=False)
+    binned_phase_firing = np.zeros((len(event_frames)-1, bins))
+    goal_vec = np.arange(ngoals)
+    goal_vec = np.tile(goal_vec, len(event_frames)//ngoals)
+    goal_vec = goal_vec[:-1]
+    num_trials = np.array([np.sum(goal_vec == i) for i in range(ngoals)])
+    max_trials = np.max(num_trials)
+
+    for i in range(len(event_frames)-1):
+        phase_frames = np.arange(event_frames[i], event_frames[i+1])
+        bin_edges = np.linspace(event_frames[i], event_frames[i+1], bins+1)
+        phase_firing = dF_cell[phase_frames]
+        bin_ix = np.digitize(phase_frames, bin_edges)
+        for j in range(bins):
+            binned_phase_firing[i, j] = np.mean(phase_firing[bin_ix == j+1])
+
+    binned_segment = np.zeros((ngoals, max_trials, binned_phase_firing.shape[1]))
+    for i in range(ngoals):
+        idx = np.where(goal_vec == i)[0]
+        binned_segment[i, :len(idx), :] = binned_phase_firing[idx, :]
+
+    min_state = min(seg.shape[0] for seg in binned_segment)
+    binned_all = np.concatenate([binned_segment[i][:min_state, :] for i in range(ngoals)], axis=1)
+
+    avg_bin = np.nanmean(binned_all, axis=0)
+    std_bin = np.nanstd(binned_all, axis=0)
+    sem_bin = std_bin / np.sqrt(binned_all.shape[0])
+
+    if stage == 6:
+        color = 'orange'
+    elif stage == 8:
+        color = 'red'
+    else:
+        color = 'blue'
+
+    if ax is None:
+        fig = plt.figure(figsize=(10, 5))
+        ax = fig.add_subplot(111, projection='polar')
+
+    angles = np.linspace(0, 2 * np.pi, bins*ngoals, endpoint=False)
+    angles = np.concatenate((angles, [angles[0]]))
+    avg_bin = np.concatenate((avg_bin, [avg_bin[0]]))
+    avg_bin = avg_bin / np.max(avg_bin)
+    sem_bin = np.concatenate((sem_bin, [sem_bin[0]]))
+    sem_bin = sem_bin / np.max(avg_bin)
+    
+    ax.set_theta_zero_location('N')
+    ax.set_theta_direction(-1)
+    ax.plot(angles[:bins*(ngoals-1)], avg_bin[:bins*(ngoals-1)], color=color, linewidth=2)
+    ax.plot(angles[bins*(ngoals-1):], avg_bin[bins*(ngoals-1):], color=color, linewidth=2)
+    ax.fill_between(angles, avg_bin - sem_bin, avg_bin + sem_bin, color=color, alpha=0.2)
+    ax.set_xticks(np.linspace(0, 2 * np.pi, ngoals, endpoint=False))
+    ax.set_rticks([np.round(np.min(avg_bin),1), np.round(np.max(avg_bin),1)])
+    if labels is None:
+        ax.set_title(f'T{stage} Cell {cell}')
+    else:
+        ax.set_title(labels)
+
+    return ax, avg_bin, sem_bin
+
+
+def create_templates(peaks=[1,4,5], bins=360, plot=True):
+
+    templates = [np.zeros((bins)) for _ in range(len(peaks))]
+
+    # Arbitrarily adds peaks to simulate activity, scaled to max at 1:
+    fake_peak = 25*stats.norm.pdf(range(50), 25, 10)
+    for i in range(5):
+        for j, peak in enumerate(peaks):
+            if i < peak:
+                templates[j][72*i:72*i + 50] = fake_peak
+
+    # Plot the templates
+    if plot:
+        _, ax = plt.subplots(1, len(peaks), figsize=(10,2))
+        ax = ax.ravel()
+        for i in range(len(peaks)):
+            ax[i].plot(templates[i])
+            ax[i].set_title(f'{peaks[i]}-peaks template')
+        
+    return templates, peaks
+
+
 #%% ########  BEHAVIOUR ########
+def get_AB_sequence(session, mouse, stage):
+    if mouse == 'TAA0000066' or mouse == 'TAA0000059':
+        if int(stage[-1]) == 3 or int(stage[-1]) == 4:
+            sequence = 'AB_shuffled'
+        elif int(stage[-1]) == 5 or int(stage[-1]) == 6:
+            sequence = 'ABAB'
+        else:
+            print('This code does not work before T3 or beyond T6 yet.')
+    elif mouse == 'TAA0000061' or mouse == 'TAA0000064':
+        if int(stage[-1]) == 3 or int(stage[-1]) == 4:
+            sequence = 'AABB'
+        elif int(stage[-1]) == 5 or int(stage[-1]) == 6:
+            sequence = 'AABB'
+        else:
+            print('This code does not work before T3 or beyond T6 yet.')
+    elif mouse == 'TAA0000062' or mouse == 'TAA0000065':
+        if int(stage[-1]) == 3 or int(stage[-1]) == 4:
+            sequence = 'AB_shuffled'
+        elif int(stage[-1]) == 5 or int(stage[-1]) == 6:
+            sequence = 'AABB'
+        else:
+            print('This code does not work before T3 or beyond T6 yet.')
+    else:
+        raise ValueError("Oops I don't know what to do about this mouse")
+    
+    session['sequence'] = sequence
+
+    return session
+    
 def load_vr_session_info(sess_data_path, VR_data=None, options=None):  # TODO: deprecated? 
     '''Get landmark, goal, and lap information from VR data.'''
 
@@ -1473,9 +1993,14 @@ def load_vr_session_info(sess_data_path, VR_data=None, options=None):  # TODO: d
     return num_landmarks, all_goals, all_lms, total_lm_position, landmarks, start_odour, num_laps
 
 
-def get_lm_entry_exit(session, positions):
+def get_lm_entry_exit(session, positions=None):
     '''Find data idx closest to landmark entry and exit.'''
 
+    if positions is None:
+        base_path = parse_session_functions.find_base_path_npz(session['mouse'],session['date'])
+        nidaq_data = parse_session_functions.load_session_npz(base_path)
+        positions = nidaq_data['position']
+        
     lm_entry_idx = []
     lm_exit_idx = []
     
@@ -1532,6 +2057,19 @@ def get_lm_entry_exit(session, positions):
     return np.array(lm_entry_idx), np.array(lm_exit_idx)
 
 
+def get_before_lm_entry_exit(session):
+    '''Find entry and exit indices for the between-landmark points'''
+    lm_entry_idx, lm_exit_idx = get_lm_entry_exit(session)
+
+    before_lm_entry_idx = [0]
+    before_lm_exit_idx = [int(lm_entry_idx[0])-1]
+    for entry, exit in zip(lm_entry_idx[1:], lm_exit_idx[:-1]):  
+        before_lm_entry_idx.append(int(exit) + 1)
+        before_lm_exit_idx.append(int(entry) - 1)
+
+    return before_lm_entry_idx, before_lm_exit_idx
+
+
 def load_nidaq_behaviour_data(sess_data_path):
     '''Load behaviour data from NIDAQ logging - after barcode alignment.'''
 
@@ -1553,10 +2091,10 @@ def load_vr_behaviour_data(sess_data_path):
     return VR_data, options
 
 
-def get_landmark_categories(sequence, num_landmarks, session):
+def get_landmark_categories(session):
     '''Find the landmarks in the entire session that belong to goals, non-goals and test.'''
 
-    session = get_landmark_ids(sequence, num_landmarks, session)
+    session = get_landmark_ids(session)
 
     # Get the landmarks that belong to each condition  
     goals_idx = np.where(np.isin(session['all_lms'], session['goal_landmark_id']))[0]
@@ -1570,19 +2108,19 @@ def get_landmark_categories(sequence, num_landmarks, session):
     return session
 
 
-def get_landmark_ids(sequence, num_landmarks, session):
+def get_landmark_ids(session):
     '''Define which landmarks belong to goals, non-goals and test.'''
 
-    if num_landmarks == 10:     # T5 and T6
-        if sequence == 'ABAB':
+    if session['num_landmarks'] == 10:     # T5 and T6
+        if session['sequence'] == 'ABAB':
             goal_landmark_id = np.array([1, 3, 5, 7])
             test_landmark_id = 9
-        elif sequence == 'AABB':  
+        elif session['sequence'] == 'AABB':  
             goal_landmark_id = np.array([0, 1, 4, 5])
             test_landmark_id = np.array([8, 9])
-        non_goal_landmark_id = np.setxor1d(np.arange(0,num_landmarks), np.append(goal_landmark_id, test_landmark_id))
+        non_goal_landmark_id = np.setxor1d(np.arange(0, session['num_landmarks']), np.append(goal_landmark_id, test_landmark_id))
  
-    elif num_landmarks == 2:    # T3 and T4
+    elif session['num_landmarks'] == 2:    # T3 and T4
         lms = np.unique(session['all_lms'])
         goal_landmark_id = session['all_lms'][session['goal_idx'][0]]
         non_goal_landmark_id = np.setdiff1d(lms, goal_landmark_id)[0]
@@ -1595,15 +2133,15 @@ def get_landmark_ids(sequence, num_landmarks, session):
     return session
 
 
-def get_landmark_category_rew_idx(sequence, num_landmarks, session, VR_data, nidaq_data):
+def get_landmark_category_rew_idx(session, VR_data, nidaq_data):
     '''Find indices also in non-goal landmarks corresponding to the same time after landmark entry as mean reward time lag.'''
     
-    reward_idx = get_rewards(VR_data, nidaq_data, session, print_output=True)
+    session = get_rewards(VR_data, nidaq_data, session, print_output=True)
 
-    rew_lm_entry_idx, miss_lm_entry_idx, nongoal_lm_entry_idx, test_lm_entry_idx = get_landmark_category_entries(VR_data, nidaq_data, sequence, num_landmarks, session)
+    rew_lm_entry_idx, miss_lm_entry_idx, nongoal_lm_entry_idx, test_lm_entry_idx = get_landmark_category_entries(VR_data, nidaq_data, session)
     
     # Calculate time lag between landmark entry and reward delivery
-    rew_time_lag = np.round(np.mean(reward_idx - rew_lm_entry_idx))
+    rew_time_lag = np.round(np.mean(session['reward_idx'] - rew_lm_entry_idx))
     print('Reward time lag from lm entry: ', rew_time_lag)
 
     # Find where reward would be on average if these landmarks were rewarded
@@ -1612,7 +2150,6 @@ def get_landmark_category_rew_idx(sequence, num_landmarks, session, VR_data, nid
     test_rew_idx = test_lm_entry_idx + rew_time_lag
 
     session['rew_time_lag'] = rew_time_lag
-    session['reward_idx'] = reward_idx
     session['miss_rew_idx'] = miss_rew_idx
     session['nongoal_rew_idx'] = nongoal_rew_idx
     session['test_rew_idx'] = test_rew_idx
@@ -1632,13 +2169,13 @@ def get_imag_rew_idx(nidaq_data, session, lm_idx):
     return imag_rew_idx
     
 
-def get_landmark_category_entries(VR_data, nidaq_data, sequence, num_landmarks, session):
+def get_landmark_category_entries(VR_data, nidaq_data, session):
     '''Find the indices of landmark entry for different types of landmarks: rewarded, miss, non-goal, test.'''
     
     lm_entry_idx, _ = get_lm_entry_exit(session, positions=nidaq_data['position'])
 
     # Find category for each landmark 
-    session = get_landmark_categories(sequence, num_landmarks, session)
+    session = get_landmark_categories(session)
 
     # Find the rewarded landmarks 
     session = get_rewarded_landmarks(VR_data, nidaq_data, session)
@@ -1657,11 +2194,11 @@ def get_landmark_category_entries(VR_data, nidaq_data, sequence, num_landmarks, 
 def get_rewarded_landmarks(VR_data, nidaq_data, session):
     '''Find the indices of rewarded (lick-triggered) landmarks.'''
 
-    reward_idx = get_rewards(VR_data, nidaq_data, session, print_output=False)
+    session = get_rewards(VR_data, nidaq_data, session, print_output=False)
     lm_entry_idx, lm_exit_idx = get_lm_entry_exit(session, positions=nidaq_data['position'])
 
     # Find rewarded landmarks 
-    reward_positions = nidaq_data['distance'][reward_idx]  # using flattened position array 
+    reward_positions = nidaq_data['distance'][session['reward_idx']]  # using flattened position array 
 
     rewarded_landmarks = [i for i, (start, end) in enumerate(zip(np.floor(nidaq_data['distance'][lm_entry_idx]), np.ceil(nidaq_data['distance'][lm_exit_idx]))) 
                             if np.any((np.ceil(reward_positions) >= start) & (np.floor(reward_positions) <= end))] 
@@ -1693,12 +2230,14 @@ def get_rewards(VR_data, nidaq_data, session, print_output=False):
         reward_idx = reward_idx[0:-1]  
     num_rewards = len(reward_idx)  
 
+    session['reward_idx'] = reward_idx
+
     if print_output:
         print('Total rewards considered here: ', num_rewards)
         print('Total rewards not considered here: ', len(rewards_to_remove))
         print('Total assistant and manual rewards: ', len(assistant_reward_idx) + len(manual_reward_idx))
 
-    return reward_idx
+    return session
 
 
 def get_VR_rewards(VR_data):
@@ -1903,7 +2442,7 @@ def get_lick_types(session, VR_data, nidaq_data):
     return licks
 
 
-def get_first_licks(session, VR_data, nidaq_data):
+def get_first_licks(session, VR_data=None, nidaq_data=None):
     """
     Get the first lick from each type in a block of licks
 
@@ -1911,7 +2450,15 @@ def get_first_licks(session, VR_data, nidaq_data):
     -------
     first_licks: Dict where the key corresponds to the lick ID
     """
+    # Load data if needed
+    if VR_data is None:
+        base_path2 = parse_session_functions.find_base_path(session['mouse'],session['date'])
+        VR_data = parse_session_functions.load_session(base_path2)
 
+    if nidaq_data is None:
+        base_path = parse_session_functions.find_base_path_npz(session['mouse'],session['date'])
+        nidaq_data = parse_session_functions.load_session_npz(base_path)
+        
     # Get landmark entry and exit indices 
     lm_entry_idx, lm_exit_idx = get_lm_entry_exit(session, nidaq_data['position'])
 
@@ -2175,6 +2722,94 @@ def get_binary_lick_map(nidaq_data, session):
     return session
 
 
+def plot_lick_maps(session):
+
+    # Load data
+    base_path = parse_session_functions.find_base_path_npz(session['mouse'], session['date'])
+    nidaq_data = parse_session_functions.load_session_npz(base_path)
+    session = get_licks(nidaq_data, session, print_output=True)
+    session = threshold_nidaq_licks(nidaq_data, session)
+
+    # Get binary lick map (laps x landmarks)
+    session = get_binary_lick_map(nidaq_data, session)
+
+    # Reshape if laps are not repeating
+    if np.array(session['binary_licked_lms'][0]).ndim != 2:
+        num_lms_considered = int(np.round((len(session['all_landmarks']) // 10) * 10))
+        num_laps = int(num_lms_considered / session['num_landmarks'])
+
+        binary_licked_lms = np.array(session['binary_licked_lms'][0][:num_lms_considered]).reshape((num_laps, session['num_landmarks']))
+    else:
+        binary_licked_lms = np.array(session['binary_licked_lms'][0])
+
+    # Get lick rate map (laps x landmarks)
+    session = get_lm_lick_rate(nidaq_data, session)
+
+    # Check number of laps
+    keys = sorted(session['lm_lick_rate'].keys())  
+    first_keys = set(k[0] for k in keys)
+
+    num_lms_considered = int(np.round((len(session['all_landmarks']) // 10) * 10))
+    num_laps = int(num_lms_considered / session['num_landmarks'])
+
+    if len(first_keys) == 1:
+        lm_lick_rate = [[] for _ in range(num_laps)]
+        for lm_idx in range(num_lms_considered):
+            lap = lm_idx // session['num_landmarks']
+            key = (0, lm_idx)
+            if key in session['lm_lick_rate']:
+                rate = session['lm_lick_rate'][key]
+                lm_lick_rate[lap].extend(rate)
+    else:
+        lm_lick_rate = [[] for _ in range(num_laps)]
+        for i in range(num_laps):
+            for lm_idx in range(num_lms_considered):
+                lap = lm_idx // session['num_landmarks']
+                key = (i, lm_idx)
+                if key in session['lm_lick_rate']:
+                    rate = session['lm_lick_rate'][key]
+                    lm_lick_rate[lap].extend(rate)
+
+    lm_lick_rate = np.array(lm_lick_rate)
+
+    # Plotting
+    import palettes
+    tm_palette = palettes.met_brew('Tam',n=123, brew_type="continuous")
+    tm_palette = tm_palette[::-1]
+    import seaborn as sns
+
+    # Plot the binary and lick rate maps for each landmark 
+    fig, ax = plt.subplots(2, 1, figsize=(10,4), sharex=False, sharey=True)
+    ax = ax.ravel()
+
+    # Plot binary licks
+    sns.heatmap(binary_licked_lms, ax=ax[0], cmap=tm_palette, vmin=0, vmax=1, cbar_kws={"ticks": [0, 1]})
+
+    # Plot lick rate
+    max_lick_rate = np.round(np.nanmax(lm_lick_rate), 1)
+    sns.heatmap(lm_lick_rate, ax=ax[1], cmap=tm_palette, vmin=0, vmax=max_lick_rate, cbar_kws={"ticks": [0, max_lick_rate]})
+    for i in range(1, session['num_landmarks']):
+        ax[1].axvline(i * 16, color='white', linestyle='--', linewidth=1)
+
+    tick_positions = [i * 16 + 16 // 2 for i in range(session['num_landmarks'])]
+    tick_labels = np.arange(1, session['num_landmarks']+1)  
+    ax[1].set_xticks(tick_positions)
+
+    for axis in ax:
+        axis.set_yticks([0,binary_licked_lms.shape[0]])
+        axis.set_yticklabels([0,binary_licked_lms.shape[0]])
+        axis.set_xticklabels(tick_labels, rotation=0)
+        axis.set_xlabel('Landmark')
+        axis.set_ylabel('Lap')
+
+    ax[0].set_title('Licked Landmarks')
+    ax[1].set_title('Lick Rate')
+
+    plt.tight_layout()
+
+    return binary_licked_lms, lm_lick_rate
+
+
 def get_licks_per_lap(session):
     #save lick indices for each lap in a dictionary
     lick_positions = {}
@@ -2220,3 +2855,191 @@ def get_position_info(VR_data):
         speed = VR_data['Speed'][position_idx].values
     
     return times, position, speed, total_dist
+
+
+# def circular_crosscorr(x, y, normalize=True):
+#     X = np.fft.fft(x)
+#     Y = np.fft.fft(y)
+#     corr = np.fft.ifft(X * Y.conj()).real
+#     if normalize:
+#         norm = np.sqrt(np.sum(x**2) * np.sum(y**2))
+#         corr = corr / norm
+#     return corr
+
+def circular_crosscorr(x, y):
+    # center the signals to not inflate by baseline offsets
+    X = np.fft.fft(x - np.mean(x))
+    Y = np.fft.fft(y - np.mean(y))
+    corr = np.fft.ifft(X * Y.conj()).real
+    # shift so that lag=0 is first
+    corr = np.fft.fftshift(corr)
+    # normalize like Pearson correlation
+    corr = corr / (np.std(x) * np.std(y) * len(x))
+    return corr
+
+
+def get_acg_template_ccg(dF, cell, event_idx, ngoals, templates, plot_firing=True, plot_corr=True):
+    """
+    Extracts the autocorrelogram of the binned firing rate of a neuron and the 
+    crosscorrelogram of the binned firing rate with two templates testing for 
+    4-fold or 5-fold goal progress.
+    """
+    template_size = templates[0].shape[0]
+
+    # Extract the firing rate
+    binned_firing_rate = cellTV.extract_arb_progress(dF, cell, event_idx, ngoals=ngoals, bins=90, plot=plot_firing, shuffle=False)
+    avg_binned_firing_rate = np.mean(binned_firing_rate, axis=0)
+
+    # Resize firing rate if needed
+    if avg_binned_firing_rate.shape[0] > template_size:
+        firing_rate_resized = resample(avg_binned_firing_rate, template_size)
+    else:
+        firing_rate_resized = avg_binned_firing_rate
+
+    # Get the autocorrelogram
+    acg = circular_crosscorr(firing_rate_resized, firing_rate_resized) 
+    ccg0 = circular_crosscorr(firing_rate_resized, templates[0]) 
+    ccg1 = circular_crosscorr(firing_rate_resized, templates[1]) 
+
+    # Plot the correlation
+    if plot_corr:
+        fig, (ax0, ax1, ax2) = plt.subplots(1, 3, figsize=(12,3), sharey=False)
+        ax1.sharey(ax2)   # explicit sharing
+        ax0.plot(np.arange(0, len(acg)), acg)
+        ax0.set_title('Autocorrelogram')
+        ax1.plot(ccg0)
+        ax1.set_title('Firing rate vs 5-fold template')
+        ax2.plot(ccg1)
+        ax2.set_title('Firing rate vs 4-fold template')
+        plt.suptitle(f'Neuron {cell}')
+        plt.tight_layout()
+
+    return acg, ccg0, ccg1
+
+
+def get_template_ccg(cell, binned_firing, templates, peaks, plot=True):
+    # Resize firing rate if needed
+    template_size = templates[0].shape[0]
+    if binned_firing.shape[0] > template_size:
+        firing_rate_resized = resample(binned_firing, template_size)
+    else:
+        firing_rate_resized = binned_firing
+
+    # Get the autocorrelogram
+    ccg = []
+    for i in range(len(templates)):
+        ccg.append(circular_crosscorr(firing_rate_resized, templates[i]))
+    ccg = np.vstack(ccg)
+    template_maxima = ccg.max(axis=1)
+
+    # find index of template with the global maximum
+    best_template = np.argmax(template_maxima)
+    n_cell_peaks = peaks[best_template]
+
+    # Plot the correlation
+    if plot:
+        _, ax = plt.subplots(1, len(templates), figsize=(10,2))
+        ax = ax.ravel()
+        y_min = min(cc.min() for cc in ccg)
+        y_max = max(cc.max() for cc in ccg)
+
+        for i in range(len(peaks)):
+            ax[i].plot(ccg[i])
+            ax[i].set_title(f'Firing rate vs {peaks[i]}-peaks template')
+            ax[i].set_ylim([y_min, y_max])   # enforce same y-scale
+
+        plt.suptitle(f'Neuron {cell}: # peaks = {n_cell_peaks}')
+        plt.tight_layout()
+
+    return n_cell_peaks, ccg
+
+
+def classify_4_or_5_peak_neurons(neurons, mean_goal_firing, peaks=[4,5], plot=True):
+    from scipy.signal import find_peaks
+    from scipy.ndimage import gaussian_filter1d
+
+    # Create templates 
+    templates, peaks = create_templates(peaks=peaks, bins=360, plot=False)
+
+    neurons_4peaks = []
+    neurons_5peaks = []
+
+    for cell in neurons:
+        # ----- Criterion 1 ----- #
+        
+        # Detect number of peaks on the binned firing
+        binned_firing = np.mean(mean_goal_firing[cell], axis=0)
+
+        # Smooth the firing to detect peaks
+        smooth_avg_bin = gaussian_filter1d(binned_firing, sigma=4, mode='wrap').copy()
+        N = binned_firing.size
+
+        # Triple the signal to detect boundary peaks
+        avg_tripled = np.concatenate((smooth_avg_bin, smooth_avg_bin, smooth_avg_bin))
+        peaks_tripled, props = find_peaks(avg_tripled, distance=10, prominence=0.3, height=0.7)
+        
+        # Discard very small peaks
+        mask = props["peak_heights"] >= 0.4 * np.mean(props['peak_heights'])
+        peaks_tripled = peaks_tripled[mask]
+
+        # Identify peaks on the first third of the tripled signal
+        polar_peaks = peaks_tripled[(peaks_tripled >= N) & (peaks_tripled < 2*N)] - N
+        
+        # ----- Criterion 2 ----- #
+
+        # Get maximum cross-correlation with either 4-peak or 5-peak templates
+        n_cell_peaks, ccg = get_template_ccg(cell, binned_firing, templates, peaks, plot=False)
+
+        # Overwrite template-based cell classification if needed 
+        if len(polar_peaks) > n_cell_peaks:
+            n_cell_peaks = 5
+
+        # ----- Classification ----- #
+        if n_cell_peaks == 4:
+            neurons_4peaks.append(cell)
+        elif n_cell_peaks == 5:
+            neurons_5peaks.append(cell)
+
+        # ----- Plotting ----- #
+        if plot: 
+            fig = plt.figure(figsize=(10, 5))
+
+            angles = np.linspace(0, 2 * np.pi, 90*5, endpoint=False)
+            angles = np.concatenate((angles, [angles[0]]))  # add the first angle to close the circle
+            peak_angles = angles[polar_peaks]
+
+            ax1 = fig.add_subplot(221, projection='polar')
+            ax1.set_theta_zero_location('N')
+            ax1.set_theta_direction(-1)
+            smooth_avg_bin = np.concatenate((smooth_avg_bin, [smooth_avg_bin[0]]))
+            ax1.plot(angles, smooth_avg_bin, color='blue', linewidth=2)
+            ax1.scatter(peak_angles, smooth_avg_bin[polar_peaks], color="red", s=40, zorder=3)
+            ax1.set_xticks(np.linspace(0, 2 * np.pi, 5, endpoint=False))
+            ax1.set_title(f'Smooth firing rate (sigma=4)')
+
+            ax2 = fig.add_subplot(222, projection='polar')
+            ax2.set_theta_zero_location('N')
+            ax2.set_theta_direction(-1)
+            binned_firing = np.concatenate((binned_firing, [binned_firing[0]]))
+            ax2.plot(angles, binned_firing, color='blue', linewidth=2)
+            ax2.scatter(peak_angles, binned_firing[polar_peaks], color="red", s=40, zorder=3)
+            ax2.set_xticks(np.linspace(0, 2 * np.pi, 5, endpoint=False))
+            ax2.set_title(f'Raw firing rate (sigma=4)')
+
+            y_min = min(cc.min() for cc in ccg)
+            y_max = max(cc.max() for cc in ccg)
+
+            ax3 = fig.add_subplot(223)
+            ax3.plot(ccg[0])
+            ax3.set_ylim([y_min, y_max])
+            ax3.set_title(f'CCG with {peaks[0]}-peak template')
+
+            ax4 = fig.add_subplot(224)
+            ax4.plot(ccg[1])
+            ax4.set_ylim([y_min, y_max])
+            ax4.set_title(f'CCG with {peaks[1]}-peak template')
+
+            plt.suptitle(f'Neuron {cell} n_peaks {n_cell_peaks}')
+            plt.tight_layout()
+    
+    return neurons_4peaks, neurons_5peaks

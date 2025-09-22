@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 import os
 # import defopt
-from barcode_util import read_h5, read_h5_with_key
+from .barcode_util import read_h5, read_h5_with_key
 import plotly.graph_objects as go
 import plotly.io as pio
 pio.renderers.default = "browser"

@@ -8,6 +8,7 @@ import sys
 import os
 import yaml
 import copy
+import scipy.stats as stats
 from scipy.stats import norm
 from scipy.interpolate import make_interp_spline
 import scipy.signal as signal
@@ -16,6 +17,12 @@ from statistics import NormalDist
 import wesanderson
 from cycler import cycler
 import palettes
+import importlib
+
+import neural_analysis_helpers
+import cellTV_functions as cellTV
+importlib.reload(neural_analysis_helpers)
+importlib.reload(cellTV)
 
 
 hfs_palette = palettes.met_brew('Hiroshige',n=123, brew_type="continuous")
@@ -341,7 +348,7 @@ def give_lap_state_id(session):
 def get_lms_visited(options, session):
     # Calculate number of landmarks visited
     if len(np.where(session['landmarks'][:,0] < session['position'][-1])[0]) != 0:
-        last_landmark = np.where(session['landmarks'][:,0] < session['position'][-1])[0][-1] # find the last landmark that was run through
+        last_landmark = len(np.where(session['landmarks'][:,0] < session['position'][-1])[0]) # find the last landmark that was run through
     else:
         last_landmark = len(session['landmarks'])  # TODO: confirm
     
@@ -457,6 +464,45 @@ def calc_speed_per_lap(session):
 
     return session
 
+
+def calc_speed_per_lap_pre7(session):
+    bins = 120
+    actual_num_laps = np.round((len(session['all_lms']) // session['num_landmarks']) )
+
+    _, lm_exit_idx = neural_analysis_helpers.get_lm_entry_exit(session)
+    lap_change_idx = lm_exit_idx[session['num_landmarks']-1::session['num_landmarks']]
+
+    speed_per_bin = np.zeros((actual_num_laps, bins))
+
+    x = 0
+    for i, idx in enumerate(lap_change_idx):
+        lap_idx = np.arange(x, idx+1)
+
+        speed_per_lap = session['speed'][lap_idx]
+        pos_per_lap = session['position'][lap_idx] 
+
+        speed_per_bin[i, :], bin_edges, _ = stats.binned_statistic(pos_per_lap, speed_per_lap, bins=bins)
+    
+        goals_per_lap = session['goals'][i * 4 : (i + 1) * 4]
+        lms_per_lap = session['landmarks'][i * session['num_landmarks'] : (i + 1) * session['num_landmarks']]
+    
+        x = idx + 1
+
+    binned_goals = np.digitize(goals_per_lap, bin_edges)
+    binned_lms = np.digitize(lms_per_lap, bin_edges)
+
+    av_speed_per_bin = np.nanmean(speed_per_bin, axis=0)
+    std_speed_per_bin = np.nanstd(speed_per_bin, axis=0)
+    sem_speed_per_bin = std_speed_per_bin / np.sqrt(actual_num_laps)
+
+    session['speed_per_bin'] = av_speed_per_bin
+    session['sem_speed_per_bin'] = sem_speed_per_bin
+    session['binned_goals'] = binned_goals
+    session['binned_lms'] = binned_lms
+
+    return session
+
+
 def calc_speed_per_state(session):
     if session['laps_needed'] == 2:
         state1_laps = session['speed_per_bin'][np.where(session['state_id'] == 0)[0]]
@@ -485,13 +531,18 @@ def calc_speed_per_state(session):
     return session
 
 def get_active_goal(session):
-    #get goal indeces
+    # get goal indices
     goal_idx = np.array([])
-    for goal in session['goals']:
-        goal_idx = np.append(goal_idx, np.where(session['landmarks'] == goal)[0][0])
-    goal_idx = goal_idx.astype(int)
+    if session['num_laps'] > 1:
+        for goal in session['goals']:
+            goal_idx = np.append(goal_idx, np.where(session['landmarks'] == goal)[0][0])
+    else:
+        for goal in session['goals']:
+            matches = np.where(session['landmarks'][:session['num_landmarks']] == goal)[0]
+            if matches.size > 0:
+                goal_idx = np.append(goal_idx, matches[0])
 
-    session['goal_idx'] = goal_idx
+    session['goal_idx'] = goal_idx.astype(int)
 
     # get active goal
     active_goal = np.zeros((session['num_laps'],len(session['landmarks'])))
@@ -508,6 +559,22 @@ def get_active_goal(session):
     session['active_goal'] = active_goal
 
     return session
+
+def get_num_landmarks(session, options):
+    rulename = options['sequence_task']['rulename']
+    if rulename == 'run-auto' or rulename == 'run-lick':  # stages 1-2
+        num_landmarks = 0
+    elif rulename == 'olfactory_shaping' or rulename == 'olfactory_test':  # stages 3-6
+        if rulename == 'olfactory_test':
+            num_landmarks = 10
+        else:
+            num_landmarks = 2
+    else:
+        num_landmarks = 10
+
+    session['num_landmarks'] = num_landmarks
+
+    return session 
 
 def get_transition_prob(session):
     #linearize session['licked_lms'] to a vector
@@ -782,11 +849,41 @@ def plot_ethogram(session,npz=False):
     ax.spines['right'].set_visible(False)
     plt.show()
 
+
+def plot_speed_profile(session, stage):
+    import matplotlib.patches as patches
+
+    if stage == 6:
+        color = 'orange'
+    elif stage == 8:
+        color = 'red'
+    else:
+        color = 'blue'
+
+    fig, ax = plt.subplots(1,1,figsize=(10,3))
+    ax.plot(session['speed_per_bin'], color=color)
+    ax.fill_between(range(len(session['speed_per_bin'])),
+                    session['speed_per_bin'] - session['sem_speed_per_bin'],
+                    session['speed_per_bin'] + session['sem_speed_per_bin'],
+                    color=color, alpha=0.3)
+
+    for lm in session['binned_lms']:
+        ax.add_patch(patches.Rectangle((lm[0],0), np.diff(lm)[0], ax.get_ylim()[1], color='grey', alpha=0.3))
+    for goal in session['binned_goals']:
+        ax.add_patch(patches.Rectangle((goal[0],0), np.diff(goal)[0], ax.get_ylim()[1], color='grey', alpha=0.5))
+    ax.set_xlabel('Landmark')
+    ax.set_ylabel('Speed (cm/s)')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    plt.show()
+
+    
 def analyse_session(mouse,date,plot=True):
     base_path = find_base_path(mouse,date)
     data = load_session(base_path)
     options = load_config(base_path)
     session = create_session_struct(data,options)
+    session = get_num_landmarks(session, options)
     session = get_lap_idx(session)
     session = get_lm_idx(session)
     session = threshold_licks(session)
@@ -817,13 +914,23 @@ def analyse_npz(mouse,date,plot=True):
     data = load_session_npz(base_path)
     base_path2 = find_base_path(mouse,date)
     options = load_config(base_path2)
+    
     session = create_session_struct_npz(data,options)
+    session['mouse'] = mouse
+    session['date'] = date
+
+    session = get_num_landmarks(session, options)
     session = get_lap_idx(session)
     session = get_lm_idx(session)
     session = threshold_licks(session)
     session = get_licks_per_lap(session)
     session = get_licked_lms(session)
     session = get_rewarded_lms(session)
+    session = get_lms_visited(options, session)
+
+    VR_data = load_session(base_path2)
+    session = neural_analysis_helpers.get_rewards(VR_data, data, session, print_output=True)
+    
     session = get_active_goal(session)
     session = get_transition_prob(session)
     session = get_all_transitions(session)
@@ -837,6 +944,55 @@ def analyse_npz(mouse,date,plot=True):
     session = calc_speed_per_state(session)
 
     print('Performance = ', np.nanmean(session['sw_state_ratio'][11:]))
+    print('Number of laps = ', session['num_laps'])
+    
+    if plot:
+        plot_ethogram(session,npz=True)
+
+    return session
+
+def analyse_npz_pre7(mouse,date,stage,plot=False):
+    base_path = find_base_path_npz(mouse,date)
+    data = load_session_npz(base_path)
+    base_path2 = find_base_path(mouse,date)
+    options = load_config(base_path2)
+
+    session = create_session_struct_npz(data,options)
+    session['mouse'] = mouse
+    session['date'] = date
+    session['stage'] = stage
+    
+    session = get_num_landmarks(session, options)
+    session = get_lap_idx(session)
+    session = get_lm_idx(session)
+    session = threshold_licks(session)
+    session = get_licks_per_lap(session)
+    session = get_licked_lms(session)
+    session = get_rewarded_lms(session)
+    session = get_lms_visited(options, session)
+
+    VR_data = load_session(base_path2)
+    session = neural_analysis_helpers.get_rewards(VR_data, data, session, print_output=True)
+    session = neural_analysis_helpers.get_AB_sequence(session, mouse, stage)
+    session = neural_analysis_helpers.get_landmark_categories(session)
+    session = neural_analysis_helpers.get_licks(data, session)
+    session = neural_analysis_helpers.get_rewarded_landmarks(VR_data, data, session)
+    session = neural_analysis_helpers.get_landmark_category_rew_idx(session, VR_data, data)
+    session = neural_analysis_helpers.get_lick_rate(data, session)
+
+    session = get_active_goal(session)
+    session = get_transition_prob(session)
+    session = get_all_transitions(session)
+    session = get_ideal_transitions(session)
+    session = get_sorted_transitions(session)
+    session = calc_laps_needed(session)
+    session = give_lap_state_id(session)
+    session = plot_licks_per_state(session)
+    # session = sw_state_ratio(session)
+    session = calc_speed_per_lap_pre7(session)
+    # session = calc_speed_per_state(session)
+
+    # print('Performance = ', np.nanmean(session['sw_state_ratio'][11:]))
     print('Number of laps = ', session['num_laps'])
     
     if plot:
