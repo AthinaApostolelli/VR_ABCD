@@ -16,10 +16,10 @@ args = parser.parse_args()
 animal =  args.animal 
 sessions = args.sessions
 
-basepath = f'/ceph/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2/{animal}'
+basepath = f'/media/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2/{animal}'
 dir_save = os.path.join(basepath, 'ROICaT')
-if not os.path.exists(dir_save):
-    os.makedirs(dir_save)
+Path(dir_save).mkdir(parents=True, exist_ok=True)
+Path(os.path.join(dir_save, 'visualization')).mkdir(parents=True, exist_ok=True)
 
 DEVICE = roicat.helpers.set_device(use_GPU=True) # Set the device to run on 
 SEED = roicat.util.set_random_seed(seed=None, deterministic=False)  # Set determinism and seed
@@ -160,7 +160,7 @@ aligner.fit_geometric(
     verbose=True,  ## Set to 3 to view plots of the alignment process if available for the method.
 )
 
-fig = aligner.plot_alignment_results_geometric()
+fig, _ = aligner.plot_alignment_results_geometric()
 fig.savefig(str(Path(dir_save).resolve() / 'visualization' / 'FOV_images_aligned_geometric.png'))
 
 # 3. Fit non-rigid transformation 
@@ -187,7 +187,7 @@ aligner.fit_nonrigid(
 )
 
 aligner.transform_images_nonrigid(FOV_images)
-fig = aligner.plot_alignment_results_nonrigid()
+fig, _ = aligner.plot_alignment_results_nonrigid()
 fig.savefig(str(Path(dir_save).resolve() / 'visualization' / 'FOV_images_aligned_non-rigid.png'))
 
 # 4. Transform ROIs
@@ -375,7 +375,7 @@ kwargs_makeConjunctiveDistanceMatrix_best = clusterer.find_optimal_parameters_fo
 fig = clusterer.plot_distSame(kwargs_makeConjunctiveDistanceMatrix=kwargs_makeConjunctiveDistanceMatrix_best)
 fig.savefig(str(Path(dir_save).resolve() / 'visualization' / 'distance_matrix_sameClusters.png'))
 
-fig = clusterer.plot_similarity_relationships(
+fig, _ = clusterer.plot_similarity_relationships(
     plots_to_show=[1,2,3], 
     max_samples=100000,  ## Make smaller if it is running too slow
     kwargs_scatter={'s':1, 'alpha':0.2},

@@ -392,11 +392,12 @@ def align_rois(roicat_dir, roicat_data_name, sessions_to_align=None, basepath=No
 
     else:
         protocol_nums = [int(re.search(r'protocol-t(\d+)', s).group(1)) for s in sessions_to_align]
+        protocol_nums = [protocol_nums[i] - protocol_nums[0] for i in range(len(protocol_nums))]
 
         # Load neural data
         if neural_data is None:
             neural_data = load_neural_data(basepath, animal, sessions_to_align, data_type=alignment_method)
-
+        
         # Load roicat results
         if roicat_results is None:
             if not roicat_dir or not roicat_data_name:
@@ -412,9 +413,10 @@ def align_rois(roicat_dir, roicat_data_name, sessions_to_align=None, basepath=No
         for s, sess in enumerate(sessions_to_align):
             datapath = basepath / animal / sess / 'funcimg' / 'Session' / 'suite2p' / 'plane0' / 'iscell.npy'
             iscell[s] = np.load(datapath)[:,0]
-
+        
         # Apply the mask to the aligned data
         labels_iscell = roicat.util.mask_UCIDs_with_iscell(ucids=roi_labels, iscell=iscell)
+        
         # Squeeze the labels to remove the unassigned labels (not necessary, but reduces the number of unique labels)
         labels_iscell = roicat.util.squeeze_UCID_labels(ucids=labels_iscell, return_array=True)  ## [(n_rois,)] * n_sessions
 
@@ -422,7 +424,7 @@ def align_rois(roicat_dir, roicat_data_name, sessions_to_align=None, basepath=No
         data_aligned_masked, idx_original_aligned = roicat.util.match_arrays_with_ucids(
             arrays=neural_data,  ## expects list (length n_sessions) of numpy arrays (shape (n_rois, n_timepoints))
             ucids=labels_iscell,  ## expects list (length n_sessions) of numpy arrays (shape (n_rois,))  OR   concatenated numpy array (shape (n_rois_total,))
-            return_indices=True
+            squeeze=True, return_indices=True
         )
 
         # Visualize the alignment
@@ -470,7 +472,8 @@ def roicat_visualize_tracked_rois(roicat_dir, roicat_data_name, sessions_to_alig
 
     # Define UCIDs / labels
     protocol_nums = [int(re.search(r'protocol-t(\d+)', s).group(1)) for s in sessions_to_align]
-    print(protocol_nums)
+    protocol_nums = [protocol_nums[i] - protocol_nums[0] for i in range(len(protocol_nums))]
+    
     labels_bySession = roicat_results['clusters']['labels_bySession']
     rois_bySession = roicat_results['ROIs']['ROIs_aligned']
     roi_labels = [labels_bySession[p] for p in protocol_nums]
