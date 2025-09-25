@@ -1894,6 +1894,34 @@ def create_templates(peaks=[1,4,5], bins=360, plot=True):
     return templates, peaks
 
 
+def get_goal_progress_cells(dF, neurons, session, event_frames, stage, save_path, ngoals=4, bins=90, reload=False, plot=True, shuffle=False):
+    # Find goal progress tuned cells - takes long if shuffling
+    filename = f'T{stage}_{ngoals}goal_progress_tracked_neurons.npz'
+
+    if os.path.exists(os.path.join(save_path, filename)) and not reload:
+        print(f'Goal progress and tracked neurons found. Loading...')
+        goal_progress_tuned = np.load(os.path.join(save_path, filename))['goal_progress_tuned']
+
+    else:
+        goal_progress_tuned = []
+        for cell in neurons:
+            real_score, shuffled_scores, phase_pref, state_pref = cellTV.calc_goal_tuningix(dF, cell, session, condition='arb', event_frames=event_frames, n_goals=ngoals, frame_rate=45, bins=bins, shuffle=shuffle, plot=False)
+
+            if (real_score > 1) & (np.abs(real_score - np.median(shuffled_scores)) > 0.5):
+                goal_progress_tuned.append(cell)
+
+        # Plot firing rates for goal progress tuned cells
+        for cell in goal_progress_tuned:
+            _ = cellTV.extract_arb_progress(dF, cell, event_frames, ngoals=ngoals, bins=90, plot=plot, shuffle=False)
+
+        # Save these neurons
+        np.savez(os.path.join(save_path, filename), goal_progress_tuned=np.array(goal_progress_tuned))
+
+    print(f"{len(goal_progress_tuned)} out of {len(neurons)} tracked neurons are goal progress tuned in T{stage}")
+
+    return goal_progress_tuned
+
+
 #%% ########  BEHAVIOUR ########
 def get_AB_sequence(session, mouse, stage):
     if mouse == 'TAA0000066' or mouse == 'TAA0000059':
@@ -2122,7 +2150,8 @@ def get_landmark_ids(session):
  
     elif session['num_landmarks'] == 2:    # T3 and T4
         lms = np.unique(session['all_lms'])
-        goal_landmark_id = session['all_lms'][session['goal_idx'][0]]
+        goal_mask = [i for i, landmark in enumerate(session['all_landmarks']) if landmark in session['goals']]
+        goal_landmark_id = session['all_lms'][goal_mask[0]]
         non_goal_landmark_id = np.setdiff1d(lms, goal_landmark_id)[0]
         test_landmark_id = None
 
@@ -2633,18 +2662,20 @@ def get_event_lick_rate(session, nidaq_data, event_idx, time_around=(-1,3), func
     return event_lick_rate
 
 
-def get_lm_lick_rate(nidaq_data, session):
+def get_lm_lick_rate(nidaq_data, session, bins=16):  # TODO I really need to fix this and make it consistent across sessions
     """Get lick rate per frame bin as the mean per bin for each landmark"""
     
     # Get all datapoints within landmarks
     session = get_data_lm_idx(nidaq_data, session)
 
-    lm_lick_rate = {}
-
     # Create a binary lick map for the entire session 
     binary_licks = np.zeros(len(nidaq_data['position']))
     binary_licks[session['thresholded_lick_idx']] = nidaq_data['licks'][session['thresholded_lick_idx']] # (actually not binary)
 
+    # if '3' in session['stage'] or '4' in session['stage']:
+    #     lm_lick_rate = np.zeros((session['all_lms'], bins))
+    # else:
+    lm_lick_rate = {}
     for lap in range(session['num_laps']):
         for lm in range(len(session['all_lms'])):
             key = (lap, lm)
@@ -2656,7 +2687,7 @@ def get_lm_lick_rate(nidaq_data, session):
             lm_licks = binary_licks[lm_idx[0]:lm_idx[-1]+1]
             
             # calculate lick rate within each landmark (mean in each bin)
-            lm_lick_rate[key], _, _ = stats.binned_statistic(lm_idx, lm_licks, bins=16)
+            lm_lick_rate[key], _, _ = stats.binned_statistic(lm_idx, lm_licks, bins=bins)
 
     session['lm_lick_rate'] = lm_lick_rate
 
@@ -2738,10 +2769,21 @@ def plot_lick_maps(session):
 
     # Reshape if laps are not repeating
     if np.array(session['binary_licked_lms'][0]).ndim != 2:
-        num_lms_considered = int(np.round((len(session['all_landmarks']) // 10) * 10))
+        num_lms_considered = int(np.round((len(session['all_landmarks']) // session['num_landmarks']) * session['num_landmarks']))
+
         num_laps = int(num_lms_considered / session['num_landmarks'])
 
-        binary_licked_lms = np.array(session['binary_licked_lms'][0][:num_lms_considered]).reshape((num_laps, session['num_landmarks']))
+        if '3' in session['stage'] or '4' in session['stage']:
+            goal_licked_lms = np.array(session['binary_licked_lms'][0][session['goals_idx']])
+            non_goal_lick_lms = np.array(session['binary_licked_lms'][0][session['non_goals_idx']])
+            min_len = min(len(goal_licked_lms), len(non_goal_lick_lms))
+            goal_licked_lms = goal_licked_lms[:min_len]
+            non_goal_lick_lms = non_goal_lick_lms[:min_len]
+            binary_licked_lms = np.column_stack((goal_licked_lms, non_goal_lick_lms))  # shape (num_laps, 2)
+
+        else: 
+            # the landmarks are in order so we can simply reshape
+            binary_licked_lms = np.array(session['binary_licked_lms'][0][:num_lms_considered]).reshape((num_laps, session['num_landmarks']))
     else:
         binary_licked_lms = np.array(session['binary_licked_lms'][0])
 
@@ -2752,28 +2794,47 @@ def plot_lick_maps(session):
     keys = sorted(session['lm_lick_rate'].keys())  
     first_keys = set(k[0] for k in keys)
 
-    num_lms_considered = int(np.round((len(session['all_landmarks']) // 10) * 10))
+    num_lms_considered = int(np.round((len(session['all_landmarks']) // session['num_landmarks']) * session['num_landmarks']))
     num_laps = int(num_lms_considered / session['num_landmarks'])
 
-    if len(first_keys) == 1:
-        lm_lick_rate = [[] for _ in range(num_laps)]
-        for lm_idx in range(num_lms_considered):
-            lap = lm_idx // session['num_landmarks']
-            key = (0, lm_idx)
-            if key in session['lm_lick_rate']:
-                rate = session['lm_lick_rate'][key]
-                lm_lick_rate[lap].extend(rate)
+    if '3' in session['stage'] or '4' in session['stage']:
+        bins = 16                                                               # TODO do not hardcode and do not do this here...
+        lm_lick_rate_array = np.full((session['num_laps'], len(session['all_lms']), bins), np.nan)
+        for (lap, lm), values in session['lm_lick_rate'].items():
+            lm_lick_rate_array[lap, lm, :] = values
+        lm_lick_rate_array = lm_lick_rate_array.reshape(session['num_laps'] * len(session['all_lms']), bins)
+        # lm_lick_rate_array = lm_lick_rate_array[:num_lms_considered]
+
+        goal_lm_lick_rate = lm_lick_rate_array[session['goals_idx']]
+        non_goal_lm_lick_rate = lm_lick_rate_array[session['non_goals_idx']]
+        min_len = min(len(goal_lm_lick_rate), len(non_goal_lm_lick_rate))
+        goal_lm_lick_rate = goal_lm_lick_rate[:min_len,:]
+        non_goal_lm_lick_rate = non_goal_lm_lick_rate[:min_len,:]
+        lm_lick_rate_array = np.column_stack((goal_lm_lick_rate, non_goal_lm_lick_rate))
+
+        lm_lick_rate = lm_lick_rate_array
+        print(lm_lick_rate.shape)
+
     else:
-        lm_lick_rate = [[] for _ in range(num_laps)]
-        for i in range(num_laps):
+        if len(first_keys) == 1:
+            lm_lick_rate = [[] for _ in range(num_laps)]
             for lm_idx in range(num_lms_considered):
                 lap = lm_idx // session['num_landmarks']
-                key = (i, lm_idx)
+                key = (0, lm_idx)
                 if key in session['lm_lick_rate']:
                     rate = session['lm_lick_rate'][key]
                     lm_lick_rate[lap].extend(rate)
+        else:
+            lm_lick_rate = [[] for _ in range(num_laps)]
+            for i in range(num_laps):
+                for lm_idx in range(num_lms_considered):
+                    lap = lm_idx // session['num_landmarks']
+                    key = (i, lm_idx)
+                    if key in session['lm_lick_rate']:
+                        rate = session['lm_lick_rate'][key]
+                        lm_lick_rate[lap].extend(rate)
 
-    lm_lick_rate = np.array(lm_lick_rate)
+        lm_lick_rate = np.array(lm_lick_rate)  # (num_laps, num_bins * num_landmarks)
 
     # Plotting
     import palettes

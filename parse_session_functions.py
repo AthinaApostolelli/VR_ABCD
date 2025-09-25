@@ -33,7 +33,7 @@ color_scheme = wesanderson.film_palette('Darjeeling Limited',palette=0)
 custom_cycler = cycler(color=color_scheme)
 
 def find_base_path(mouse,date):
-    data_dir = '/Volumes/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2/' + mouse
+    data_dir = '/media/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2/' + mouse
     folders = [f for f in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, f))]
     sessions = [s for s in folders if date in s]
     if not sessions:
@@ -63,7 +63,7 @@ def find_base_path(mouse,date):
     return base_path
 
 def find_base_path_npz(mouse,date):
-    data_dir = '/Volumes/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2/' + mouse
+    data_dir = '/media/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2/' + mouse
     folders = [f for f in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, f))]
     sessions = [s for s in folders if date in s]
     base_path = os.path.join(data_dir, sessions[0])
@@ -853,12 +853,16 @@ def plot_ethogram(session,npz=False):
 def plot_speed_profile(session, stage):
     import matplotlib.patches as patches
 
-    if stage == 6:
+    if stage == 3:
+        color = '#325235'
+    elif stage == 4:
+        color = '#9E664C'
+    elif stage == 5:
+        color = 'blue'
+    elif stage == 6:
         color = 'orange'
     elif stage == 8:
         color = 'red'
-    else:
-        color = 'blue'
 
     fig, ax = plt.subplots(1,1,figsize=(10,3))
     ax.plot(session['speed_per_bin'], color=color)
