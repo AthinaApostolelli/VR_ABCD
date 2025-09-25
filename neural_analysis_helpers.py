@@ -1853,9 +1853,9 @@ def plot_arb_progress(dF, cell, event_frames, ngoals, bins, stage, labels=None, 
     angles = np.linspace(0, 2 * np.pi, bins*ngoals, endpoint=False)
     angles = np.concatenate((angles, [angles[0]]))
     avg_bin = np.concatenate((avg_bin, [avg_bin[0]]))
-    avg_bin = avg_bin / np.max(avg_bin)
+    # avg_bin = avg_bin / np.max(avg_bin)
     sem_bin = np.concatenate((sem_bin, [sem_bin[0]]))
-    sem_bin = sem_bin / np.max(avg_bin)
+    # sem_bin = sem_bin / np.max(avg_bin)
     
     ax.set_theta_zero_location('N')
     ax.set_theta_direction(-1)
@@ -2666,6 +2666,9 @@ def get_lm_lick_rate(nidaq_data, session):
 def get_binned_lick_rate(nidaq_data, session):  # TODO
     """Get lick rate per frame bin as the mean per bin for each landmark and the gray zones before"""
     
+    # Threshold licks
+    session = threshold_nidaq_licks(nidaq_data, session)
+
     # Get all datapoints within landmarks
     session = get_data_lm_idx(nidaq_data, session)
 
@@ -2954,13 +2957,15 @@ def get_template_ccg(cell, binned_firing, templates, peaks, plot=True):
     return n_cell_peaks, ccg
 
 
-def classify_4_or_5_peak_neurons(neurons, mean_goal_firing, peaks=[4,5], plot=True):
+def classify_4_or_5_peak_neurons(neurons, mean_goal_firing, peaks=[1,4,5], plot=True):
     from scipy.signal import find_peaks
     from scipy.ndimage import gaussian_filter1d
+    import matplotlib.gridspec as gridspec
 
     # Create templates 
     templates, peaks = create_templates(peaks=peaks, bins=360, plot=False)
 
+    neurons_1peaks = []
     neurons_4peaks = []
     neurons_5peaks = []
 
@@ -2991,7 +2996,7 @@ def classify_4_or_5_peak_neurons(neurons, mean_goal_firing, peaks=[4,5], plot=Tr
         n_cell_peaks, ccg = get_template_ccg(cell, binned_firing, templates, peaks, plot=False)
 
         # Overwrite template-based cell classification if needed 
-        if len(polar_peaks) > n_cell_peaks:
+        if (n_cell_peaks == 4) and (len(polar_peaks) > n_cell_peaks):
             n_cell_peaks = 5
 
         # ----- Classification ----- #
@@ -2999,16 +3004,29 @@ def classify_4_or_5_peak_neurons(neurons, mean_goal_firing, peaks=[4,5], plot=Tr
             neurons_4peaks.append(cell)
         elif n_cell_peaks == 5:
             neurons_5peaks.append(cell)
+        elif n_cell_peaks == 1:
+            neurons_1peaks.append(cell)
 
         # ----- Plotting ----- #
         if plot: 
-            fig = plt.figure(figsize=(10, 5))
+
+            fig = plt.figure(figsize=(8, 5))
+            gs = gridspec.GridSpec(2, 2, height_ratios=[3, 2])  # top row 3/5, bottom row 2/5
+
+            # top row (polar plots)
+            ax1 = fig.add_subplot(gs[0, 0], projection='polar')
+            ax2 = fig.add_subplot(gs[0, 1], projection='polar')
+
+            # bottom row (CCGs)
+            ax3 = fig.add_subplot(gs[1, 0])
+            ax4 = fig.add_subplot(gs[1, 1])
+            # fig = plt.figure(figsize=(10, 5))
 
             angles = np.linspace(0, 2 * np.pi, 90*5, endpoint=False)
             angles = np.concatenate((angles, [angles[0]]))  # add the first angle to close the circle
             peak_angles = angles[polar_peaks]
 
-            ax1 = fig.add_subplot(221, projection='polar')
+            # ax1 = fig.add_subplot(221, projection='polar')
             ax1.set_theta_zero_location('N')
             ax1.set_theta_direction(-1)
             smooth_avg_bin = np.concatenate((smooth_avg_bin, [smooth_avg_bin[0]]))
@@ -3017,24 +3035,24 @@ def classify_4_or_5_peak_neurons(neurons, mean_goal_firing, peaks=[4,5], plot=Tr
             ax1.set_xticks(np.linspace(0, 2 * np.pi, 5, endpoint=False))
             ax1.set_title(f'Smooth firing rate (sigma=4)')
 
-            ax2 = fig.add_subplot(222, projection='polar')
+            # ax2 = fig.add_subplot(222, projection='polar')
             ax2.set_theta_zero_location('N')
             ax2.set_theta_direction(-1)
             binned_firing = np.concatenate((binned_firing, [binned_firing[0]]))
             ax2.plot(angles, binned_firing, color='blue', linewidth=2)
             ax2.scatter(peak_angles, binned_firing[polar_peaks], color="red", s=40, zorder=3)
             ax2.set_xticks(np.linspace(0, 2 * np.pi, 5, endpoint=False))
-            ax2.set_title(f'Raw firing rate (sigma=4)')
+            ax2.set_title(f'Raw firing rate')
 
             y_min = min(cc.min() for cc in ccg)
             y_max = max(cc.max() for cc in ccg)
 
-            ax3 = fig.add_subplot(223)
+            # ax3 = fig.add_subplot(223)
             ax3.plot(ccg[0])
             ax3.set_ylim([y_min, y_max])
             ax3.set_title(f'CCG with {peaks[0]}-peak template')
 
-            ax4 = fig.add_subplot(224)
+            # ax4 = fig.add_subplot(224)
             ax4.plot(ccg[1])
             ax4.set_ylim([y_min, y_max])
             ax4.set_title(f'CCG with {peaks[1]}-peak template')
@@ -3042,4 +3060,4 @@ def classify_4_or_5_peak_neurons(neurons, mean_goal_firing, peaks=[4,5], plot=Tr
             plt.suptitle(f'Neuron {cell} n_peaks {n_cell_peaks}')
             plt.tight_layout()
     
-    return neurons_4peaks, neurons_5peaks
+    return neurons_1peaks, neurons_4peaks, neurons_5peaks

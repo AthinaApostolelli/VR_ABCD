@@ -1065,7 +1065,7 @@ def cluster_all_corr(dF,plot=False):
     return correlation_all, correlation_sorted
 
 
-def plot_arb_progress_2cells(dF, cell, event_frames, ngoals, bins, stages, labels=None, plot=False, shuffle=False):
+def plot_arb_progress_2cells(dF, cell, event_frames, ngoals, bins, stages, labels=None, plot=False, shuffle=False, plot_firing=False):
 
     """
     Extract the progress tuning between arbitrary events for 2 cells.
@@ -1130,6 +1130,8 @@ def plot_arb_progress_2cells(dF, cell, event_frames, ngoals, bins, stages, label
         sem_bin.append(std_bin[c] / np.sqrt(binned_all[c].shape[0]))
 
     if plot:
+        cell = np.array(cell).astype(int)
+
         # Define colors 
         colors = np.empty(len(stages), dtype=object)
         
@@ -1164,7 +1166,10 @@ def plot_arb_progress_2cells(dF, cell, event_frames, ngoals, bins, stages, label
         # Plot
         fig = plt.figure(figsize=(10, 5))
         
-        ax1 = fig.add_subplot(111, projection='polar')
+        if not plot_firing:
+            ax1 = fig.add_subplot(111, projection='polar')
+        else:
+            ax1 = fig.add_subplot(121, projection='polar')
         ax1.set_theta_zero_location('N')
         ax1.set_theta_direction(-1)
         angles = np.linspace(0, 2 * np.pi, bins*ngoals, endpoint=False)
@@ -1190,6 +1195,13 @@ def plot_arb_progress_2cells(dF, cell, event_frames, ngoals, bins, stages, label
             ax1.set_title(f'Cell {cell} - Average Firing Rate (Polar)')
 
         plt.legend(loc='upper right')
+
+        if plot_firing: 
+            ax2 = fig.add_subplot(122)
+            cax = ax2.imshow(binned_all[0], aspect='auto', cmap='viridis', interpolation='none')
+            ax2.set_title(f'Cell {cell} - Binned Firing Rates')
+            plt.colorbar(cax, ax=ax2, label='dF/F')
+
         plt.tight_layout()
 
     return binned_all
