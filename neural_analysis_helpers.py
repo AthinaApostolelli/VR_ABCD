@@ -11,6 +11,7 @@ import math
 from math import log10, floor
 import itertools
 import seaborn as sns
+import palettes
 import importlib
 
 import parse_session_functions
@@ -2672,14 +2673,10 @@ def get_lm_lick_rate(nidaq_data, session, bins=16):  # TODO I really need to fix
     binary_licks = np.zeros(len(nidaq_data['position']))
     binary_licks[session['thresholded_lick_idx']] = nidaq_data['licks'][session['thresholded_lick_idx']] # (actually not binary)
 
-    # if '3' in session['stage'] or '4' in session['stage']:
-    #     lm_lick_rate = np.zeros((session['all_lms'], bins))
-    # else:
-    lm_lick_rate = {}
-    for lap in range(session['num_laps']):
+    if '3' in session['stage'] or '4' in session['stage']:
+        
+        lm_lick_rate = np.zeros((len(session['all_lms']), bins))
         for lm in range(len(session['all_lms'])):
-            key = (lap, lm)
-
             # datapoints within landmarks for each lap 
             lm_idx = np.where(session['data_lm_idx'] == lm+1)[0]
 
@@ -2687,7 +2684,22 @@ def get_lm_lick_rate(nidaq_data, session, bins=16):  # TODO I really need to fix
             lm_licks = binary_licks[lm_idx[0]:lm_idx[-1]+1]
             
             # calculate lick rate within each landmark (mean in each bin)
-            lm_lick_rate[key], _, _ = stats.binned_statistic(lm_idx, lm_licks, bins=bins)
+            lm_lick_rate[lm], _, _ = stats.binned_statistic(lm_idx, lm_licks, bins=bins)
+
+    else:
+        lm_lick_rate = {}
+        for lap in range(session['num_laps']):
+            for lm in range(len(session['all_lms'])):
+                key = (lap, lm)
+
+                # datapoints within landmarks for each lap 
+                lm_idx = np.where(session['data_lm_idx'] == lm+1)[0]
+
+                # binary licks within landmark
+                lm_licks = binary_licks[lm_idx[0]:lm_idx[-1]+1]
+                
+                # calculate lick rate within each landmark (mean in each bin)
+                lm_lick_rate[key], _, _ = stats.binned_statistic(lm_idx, lm_licks, bins=bins)
 
     session['lm_lick_rate'] = lm_lick_rate
 
@@ -2733,23 +2745,20 @@ def get_binary_lick_map(nidaq_data, session):
     # Get all datapoints within landmarks
     session = get_data_lm_idx(nidaq_data, session)
 
-    licked_lms = np.zeros((session['num_laps'], len(session['all_lms'])))
+    licked_lms = np.empty((len(session['all_lms'])))
+    for lm in range(len(session['all_lms'])):
+        # datapoints within landmarks for each lap 
+        lm_idx = np.where(session['data_lm_idx'] == lm+1)[0]
 
-    for lap in range(session['num_laps']):
-        for lm in range(len(session['all_lms'])):
-
-            # datapoints within landmarks for each lap 
-            lm_idx = np.where(session['data_lm_idx'] == lm+1)[0]
-
-            # Find all licks within the landmark
-            if 'thresholded_lick_idx' in session:
-                target_licks = np.intersect1d(lm_idx, session['thresholded_lick_idx'])
-            else:
-                target_licks = np.intersect1d(lm_idx, session['lick_idx'])
-            if len(target_licks) > 0:
-                licked_lms[lap,lm] = 1
-            else:
-                licked_lms[lap,lm] = 0
+        # Find all licks within the landmark
+        if 'thresholded_lick_idx' in session:
+            target_licks = np.intersect1d(lm_idx, session['thresholded_lick_idx'])
+        else:
+            target_licks = np.intersect1d(lm_idx, session['lick_idx'])
+        if len(target_licks) > 0:
+            licked_lms[lm] = 1
+        else:
+            licked_lms[lm] = 0
 
     session['binary_licked_lms'] = licked_lms
 
@@ -2768,54 +2777,50 @@ def plot_lick_maps(session):
     session = get_binary_lick_map(nidaq_data, session)
 
     # Reshape if laps are not repeating
-    if np.array(session['binary_licked_lms'][0]).ndim != 2:
+    # if np.array(session['binary_licked_lms']).ndim != 2:
+    if session['num_laps'] > 1:
         num_lms_considered = int(np.round((len(session['all_landmarks']) // session['num_landmarks']) * session['num_landmarks']))
-
         num_laps = int(num_lms_considered / session['num_landmarks'])
 
         if '3' in session['stage'] or '4' in session['stage']:
-            goal_licked_lms = np.array(session['binary_licked_lms'][0][session['goals_idx']])
-            non_goal_lick_lms = np.array(session['binary_licked_lms'][0][session['non_goals_idx']])
-            min_len = min(len(goal_licked_lms), len(non_goal_lick_lms))
-            goal_licked_lms = goal_licked_lms[:min_len]
-            non_goal_lick_lms = non_goal_lick_lms[:min_len]
-            binary_licked_lms = np.column_stack((goal_licked_lms, non_goal_lick_lms))  # shape (num_laps, 2)
 
+            # Determine how many rows to keep
+            min_len = min(len(session['goals_idx']), len(session['non_goals_idx']))
+            goal_licked_lms = session['binary_licked_lms'][session['goals_idx'][:min_len]]
+            non_goal_licked_lms = session['binary_licked_lms'][session['non_goals_idx'][:min_len]]
+
+            goal_licked_lms = goal_licked_lms.reshape((num_laps, -1))        # -1 lets numpy figure out columns
+            non_goal_licked_lms = non_goal_licked_lms.reshape((num_laps, -1))
+
+            binary_licked_lms = np.column_stack((goal_licked_lms, non_goal_licked_lms))
         else: 
             # the landmarks are in order so we can simply reshape
             binary_licked_lms = np.array(session['binary_licked_lms'][0][:num_lms_considered]).reshape((num_laps, session['num_landmarks']))
     else:
-        binary_licked_lms = np.array(session['binary_licked_lms'][0])
+        # binary_licked_lms = np.array(session['binary_licked_lms'][0])
+        binary_licked_lms = np.array(session['binary_licked_lms'])
 
     # Get lick rate map (laps x landmarks)
     session = get_lm_lick_rate(nidaq_data, session)
 
     # Check number of laps
-    keys = sorted(session['lm_lick_rate'].keys())  
-    first_keys = set(k[0] for k in keys)
-
     num_lms_considered = int(np.round((len(session['all_landmarks']) // session['num_landmarks']) * session['num_landmarks']))
     num_laps = int(num_lms_considered / session['num_landmarks'])
 
     if '3' in session['stage'] or '4' in session['stage']:
-        bins = 16                                                               # TODO do not hardcode and do not do this here...
-        lm_lick_rate_array = np.full((session['num_laps'], len(session['all_lms']), bins), np.nan)
-        for (lap, lm), values in session['lm_lick_rate'].items():
-            lm_lick_rate_array[lap, lm, :] = values
-        lm_lick_rate_array = lm_lick_rate_array.reshape(session['num_laps'] * len(session['all_lms']), bins)
-        # lm_lick_rate_array = lm_lick_rate_array[:num_lms_considered]
+        goal_lm_lick_rate = session['lm_lick_rate'][session['goals_idx']]
+        non_goal_lm_lick_rate = session['lm_lick_rate'][session['non_goals_idx']]
 
-        goal_lm_lick_rate = lm_lick_rate_array[session['goals_idx']]
-        non_goal_lm_lick_rate = lm_lick_rate_array[session['non_goals_idx']]
         min_len = min(len(goal_lm_lick_rate), len(non_goal_lm_lick_rate))
         goal_lm_lick_rate = goal_lm_lick_rate[:min_len,:]
         non_goal_lm_lick_rate = non_goal_lm_lick_rate[:min_len,:]
-        lm_lick_rate_array = np.column_stack((goal_lm_lick_rate, non_goal_lm_lick_rate))
 
-        lm_lick_rate = lm_lick_rate_array
-        print(lm_lick_rate.shape)
+        lm_lick_rate = np.column_stack((goal_lm_lick_rate, non_goal_lm_lick_rate))
+        
+    else: # TODO
+        keys = sorted(session['lm_lick_rate'].keys())  
+        first_keys = set(k[0] for k in keys)
 
-    else:
         if len(first_keys) == 1:
             lm_lick_rate = [[] for _ in range(num_laps)]
             for lm_idx in range(num_lms_considered):
@@ -2837,39 +2842,44 @@ def plot_lick_maps(session):
         lm_lick_rate = np.array(lm_lick_rate)  # (num_laps, num_bins * num_landmarks)
 
     # Plotting
-    import palettes
-    tm_palette = palettes.met_brew('Tam',n=123, brew_type="continuous")
+    tm_palette = palettes.met_brew('Tam', n=123, brew_type="continuous")
     tm_palette = tm_palette[::-1]
-    import seaborn as sns
-
-    # Plot the binary and lick rate maps for each landmark 
-    fig, ax = plt.subplots(2, 1, figsize=(10,4), sharex=False, sharey=True)
-    ax = ax.ravel()
-
-    # Plot binary licks
-    sns.heatmap(binary_licked_lms, ax=ax[0], cmap=tm_palette, vmin=0, vmax=1, cbar_kws={"ticks": [0, 1]})
-
-    # Plot lick rate
-    max_lick_rate = np.round(np.nanmax(lm_lick_rate), 1)
-    sns.heatmap(lm_lick_rate, ax=ax[1], cmap=tm_palette, vmin=0, vmax=max_lick_rate, cbar_kws={"ticks": [0, max_lick_rate]})
-    for i in range(1, session['num_landmarks']):
-        ax[1].axvline(i * 16, color='white', linestyle='--', linewidth=1)
 
     tick_positions = [i * 16 + 16 // 2 for i in range(session['num_landmarks'])]
     tick_labels = np.arange(1, session['num_landmarks']+1)  
-    ax[1].set_xticks(tick_positions)
+    
+    # Plot the binary and lick rate maps for each landmark 
+    if session['num_landmarks'] == 2:
+        fig, ax = plt.subplots(1,2, figsize=(8,3), sharex=False, sharey=False)
+    else:
+        fig, ax = plt.subplots(2, 1, figsize=(10,4), sharex=False, sharey=False)
+    
+    ax = ax.ravel()
+
+    # Plot binary licks  
+    sns.heatmap(binary_licked_lms, ax=ax[0], cmap=[tm_palette[0], tm_palette[-1]], 
+                vmin=0, vmax=1, cbar_kws={"ticks": [0, 1]}, xticklabels=(tick_labels), 
+                yticklabels=[0, binary_licked_lms.shape[0]])
+
+    # Plot lick rate
+    max_lick_rate = np.round(np.nanmax(lm_lick_rate), 1)
+    sns.heatmap(lm_lick_rate, ax=ax[1], cmap=tm_palette, vmin=0, vmax=max_lick_rate, 
+                cbar_kws={"ticks": [0, max_lick_rate]})
+    for i in range(1, session['num_landmarks']):
+        ax[1].axvline(i * 16, color='white', linestyle='--', linewidth=1)
 
     for axis in ax:
-        axis.set_yticks([0,binary_licked_lms.shape[0]])
-        axis.set_yticklabels([0,binary_licked_lms.shape[0]])
-        axis.set_xticklabels(tick_labels, rotation=0)
+        axis.set_yticks([0, binary_licked_lms.shape[0]])
+        axis.set_yticklabels([0, binary_licked_lms.shape[0]])
         axis.set_xlabel('Landmark')
         axis.set_ylabel('Lap')
 
     ax[0].set_title('Licked Landmarks')
     ax[1].set_title('Lick Rate')
-
-    plt.tight_layout()
+    ax[1].set_xticks(tick_positions)
+    ax[1].set_xticklabels(tick_labels, rotation=0)
+    
+    # plt.tight_layout()
 
     return binary_licked_lms, lm_lick_rate
 

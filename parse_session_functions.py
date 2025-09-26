@@ -33,7 +33,7 @@ color_scheme = wesanderson.film_palette('Darjeeling Limited',palette=0)
 custom_cycler = cycler(color=color_scheme)
 
 def find_base_path(mouse,date):
-    data_dir = '/media/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2/' + mouse
+    data_dir = '/Volumes/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2/' + mouse
     folders = [f for f in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, f))]
     sessions = [s for s in folders if date in s]
     if not sessions:
@@ -63,7 +63,7 @@ def find_base_path(mouse,date):
     return base_path
 
 def find_base_path_npz(mouse,date):
-    data_dir = '/media/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2/' + mouse
+    data_dir = '/Volumes/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2/' + mouse
     folders = [f for f in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, f))]
     sessions = [s for s in folders if date in s]
     base_path = os.path.join(data_dir, sessions[0])
@@ -475,18 +475,21 @@ def calc_speed_per_lap_pre7(session):
     speed_per_bin = np.zeros((actual_num_laps, bins))
 
     x = 0
-    for i, idx in enumerate(lap_change_idx):
-        lap_idx = np.arange(x, idx+1)
+    if '3' in session['stage'] or '4' in session['stage']:
+        print('WIP') # TODO left off here
+    else:
+        for i, idx in enumerate(lap_change_idx):
+            lap_idx = np.arange(x, idx+1)
 
-        speed_per_lap = session['speed'][lap_idx]
-        pos_per_lap = session['position'][lap_idx] 
+            speed_per_lap = session['speed'][lap_idx]
+            pos_per_lap = session['position'][lap_idx] 
 
-        speed_per_bin[i, :], bin_edges, _ = stats.binned_statistic(pos_per_lap, speed_per_lap, bins=bins)
-    
-        goals_per_lap = session['goals'][i * 4 : (i + 1) * 4]
-        lms_per_lap = session['landmarks'][i * session['num_landmarks'] : (i + 1) * session['num_landmarks']]
-    
-        x = idx + 1
+            speed_per_bin[i, :], bin_edges, _ = stats.binned_statistic(pos_per_lap, speed_per_lap, bins=bins)
+        
+            goals_per_lap = session['goals'][i * 4 : (i + 1) * 4]
+            lms_per_lap = session['landmarks'][i * session['num_landmarks'] : (i + 1) * session['num_landmarks']]
+        
+            x = idx + 1
 
     binned_goals = np.digitize(goals_per_lap, bin_edges)
     binned_lms = np.digitize(lms_per_lap, bin_edges)

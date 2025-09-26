@@ -1139,10 +1139,10 @@ def plot_arb_progress_2cells(dF, cell, event_frames, ngoals, bins, stages, label
             
             if stages[0] == 3:
                 colors[0] = '#325235'
-                colors[1] = '#537957'
+                colors[1] = '#6AC272'
             elif stages[0] == 4:
                 colors[0] = '#9E664C'
-                colors[1] = '#C08468'
+                colors[1] = '#E68558'
             elif stages[0] == 5:
                 colors[0] = 'blue'
                 colors[1] = 'deepskyblue'
