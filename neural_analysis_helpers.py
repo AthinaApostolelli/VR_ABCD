@@ -1897,7 +1897,10 @@ def create_templates(peaks=[1,4,5], bins=360, plot=True):
 
 def get_goal_progress_cells(dF, neurons, session, event_frames, stage, save_path, ngoals=4, bins=90, period='goal', reload=False, plot=True, shuffle=False):
     # Find goal progress tuned cells - takes long if shuffling
-    filename = f'T{stage}_{ngoals}goal_progress_tracked_neurons.npz'
+    if period == 'goal':
+        filename = f'T{stage}_{ngoals}goal_progress_tracked_neurons.npz'
+    else:
+        filename = f'T{stage}_{ngoals}period_tracked_neurons.npz'
 
     if os.path.exists(os.path.join(save_path, filename)) and not reload:
         print(f'Goal progress and tracked neurons found. Loading...')
@@ -2775,39 +2778,37 @@ def plot_lick_maps(session):
     session = get_licks(nidaq_data, session, print_output=True)
     session = threshold_nidaq_licks(nidaq_data, session)
 
-    # Get binary lick map (laps x landmarks)
+    # ------- Get binary lick map (laps x landmarks) ------- #
     session = get_binary_lick_map(nidaq_data, session)
 
     # Reshape if laps are not repeating
     # if np.array(session['binary_licked_lms']).ndim != 2:
-    if session['num_laps'] > 1:
-        num_lms_considered = int(np.round((len(session['all_landmarks']) // session['num_landmarks']) * session['num_landmarks']))
-        num_laps = int(num_lms_considered / session['num_landmarks'])
 
-        if '3' in session['stage'] or '4' in session['stage']:
-
-            # Determine how many rows to keep
-            min_len = min(len(session['goals_idx']), len(session['non_goals_idx']))
-            goal_licked_lms = session['binary_licked_lms'][session['goals_idx'][:min_len]]
-            non_goal_licked_lms = session['binary_licked_lms'][session['non_goals_idx'][:min_len]]
-
-            goal_licked_lms = goal_licked_lms.reshape((num_laps, -1))        # -1 lets numpy figure out columns
-            non_goal_licked_lms = non_goal_licked_lms.reshape((num_laps, -1))
-
-            binary_licked_lms = np.column_stack((goal_licked_lms, non_goal_licked_lms))
-        else: 
-            # the landmarks are in order so we can simply reshape
-            binary_licked_lms = np.array(session['binary_licked_lms'][0][:num_lms_considered]).reshape((num_laps, session['num_landmarks']))
-    else:
-        # binary_licked_lms = np.array(session['binary_licked_lms'][0])
-        binary_licked_lms = np.array(session['binary_licked_lms'])
-
-    # Get lick rate map (laps x landmarks)
-    session = get_lm_lick_rate(nidaq_data, session)
-
-    # Check number of laps
+    # Check number of actual laps
     num_lms_considered = int(np.round((len(session['all_landmarks']) // session['num_landmarks']) * session['num_landmarks']))
     num_laps = int(num_lms_considered / session['num_landmarks'])
+
+    if '3' in session['stage'] or '4' in session['stage']:
+        # The landmarks might not be in order so we need to be careful about binning 
+        # Determine how many rows to keep
+        min_len = min(len(session['goals_idx']), len(session['non_goals_idx']))
+        goal_licked_lms = session['binary_licked_lms'][session['goals_idx'][:min_len]]
+        non_goal_licked_lms = session['binary_licked_lms'][session['non_goals_idx'][:min_len]]
+
+        goal_licked_lms = goal_licked_lms.reshape((num_laps, -1))        # -1 lets numpy figure out columns
+        non_goal_licked_lms = non_goal_licked_lms.reshape((num_laps, -1))
+
+        binary_licked_lms = np.column_stack((goal_licked_lms, non_goal_licked_lms))
+    else: 
+        # the landmarks are in order so we can simply reshape
+        binary_licked_lms = np.array(session['binary_licked_lms'][0][:num_lms_considered]).reshape((num_laps, session['num_landmarks']))
+    
+        # else:
+        #     # binary_licked_lms = np.array(session['binary_licked_lms'][0])
+        #     binary_licked_lms = np.array(session['binary_licked_lms'])
+
+    # ------- Get lick rate map (laps x landmarks) ------- #
+    session = get_lm_lick_rate(nidaq_data, session)
 
     if '3' in session['stage'] or '4' in session['stage']:
         goal_lm_lick_rate = session['lm_lick_rate'][session['goals_idx']]

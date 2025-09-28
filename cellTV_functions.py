@@ -844,7 +844,7 @@ def extract_arb_progress(dF, cell, session, event_frames, ngoals, bins, period='
             assert ngoals == 2
             goal_vec = np.empty((len(event_frames)), dtype=int)
             for i in range(len(event_frames)):
-                if i in session['goal_idx']:
+                if i in session['goals_idx']:
                     goal_vec[i] = 0
                 elif i in session['non_goals_idx']:
                     goal_vec[i] = 1
@@ -1120,8 +1120,7 @@ def plot_arb_progress_2cells(dF, cell, sessions, event_frames, ngoals, bins, sta
             assert ngoals == 2
             goal_vec = np.empty((len(event_frames[c])), dtype=int)
             for i in range(len(event_frames[c])):
-                if i in sessions[c]['goal_idx']:
-                    # print(i)
+                if i in sessions[c]['goals_idx']:
                     goal_vec[i] = 0
                 elif i in sessions[c]['non_goals_idx']:
                     goal_vec[i] = 1
