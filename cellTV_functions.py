@@ -831,15 +831,33 @@ def extract_goal_progress(dF,cell,session,frame_rate = 45,bins=90,plot=False,shu
 #         plt.tight_layout()
 #     return binned_all, reward_ix
 
-def extract_arb_progress(dF, cell, event_frames, ngoals, bins, stage=None, plot=False, shuffle=False):
+def extract_arb_progress(dF, cell, session, event_frames, ngoals, bins, period='goal', stage=None, plot=False, shuffle=False):
     """
     Extract the progress tuning between arbitrary events.
     """
     dF_cell = extract_cell_trace(dF, cell, plot=False)
     binned_phase_firing = np.zeros((len(event_frames)-1, bins))
-    goal_vec = np.arange(ngoals)
-    goal_vec = np.tile(goal_vec, len(event_frames)//ngoals)
+
+    if period == 'goal':
+        # Events are organised based on whether they are a goal or not
+        if ('shuffled' in session['sequence']):
+            assert ngoals == 2
+            goal_vec = np.empty((len(event_frames)), dtype=int)
+            for i in range(len(event_frames)):
+                if i in session['goal_idx']:
+                    goal_vec[i] = 0
+                elif i in session['non_goals_idx']:
+                    goal_vec[i] = 1
+        else:
+            goal_vec = np.arange(ngoals)
+            goal_vec = np.tile(goal_vec, len(event_frames)//ngoals) 
+
+    elif period == 'landmark':
+        # Events are organised based on the order in which they occur
+        goal_vec = np.arange(ngoals)
+        goal_vec = np.tile(goal_vec, len(event_frames)//ngoals)  
     goal_vec = goal_vec[:-1]
+
     num_trials = np.zeros(ngoals)
     for i in range(ngoals):
         num_trials[i] = np.sum(goal_vec == i)
@@ -870,7 +888,13 @@ def extract_arb_progress(dF, cell, event_frames, ngoals, bins, stage=None, plot=
     sem_bin = std_bin / np.sqrt(binned_all.shape[0])
 
     if plot:
-        if stage == 6:
+        if stage == 3:
+            color = '#325235'
+        elif stage == 4:
+            color = '#9E664C'
+        elif stage == 5:
+            color = 'blue'
+        elif stage == 6:
             color = 'orange'
         elif stage == 8:
             color = 'red'
@@ -899,7 +923,7 @@ def extract_arb_progress(dF, cell, event_frames, ngoals, bins, stage=None, plot=
 
     return binned_all
 
-def calc_goal_tuningix(dF, cell, session, condition='goal',event_frames=None,n_goals=4, frame_rate=45, bins=90, shuffle=True,plot=False):
+def calc_goal_tuningix(dF, cell, session, condition='goal', period='goal', event_frames=None, n_goals=4, frame_rate=45, bins=90, shuffle=True, plot=False):
 
     """
     Calculate the goal tuning index for a specific cell by comparing the real score to shuffled scores.
@@ -908,7 +932,7 @@ def calc_goal_tuningix(dF, cell, session, condition='goal',event_frames=None,n_g
     if condition == 'goal':
         binned_all, _ = extract_goal_progress(dF, cell, session, frame_rate=frame_rate, bins=bins, plot=False, shuffle=False)
     elif condition == 'arb':
-        binned_all = extract_arb_progress(dF, cell, event_frames, n_goals, bins, plot=False, shuffle=False)
+        binned_all = extract_arb_progress(dF, cell, session, event_frames, n_goals, bins, period=period, plot=False, shuffle=False)
 
     av_binned = np.nanmean(binned_all, axis=0)
     ngoals = av_binned.shape[0]/bins
@@ -937,7 +961,7 @@ def calc_goal_tuningix(dF, cell, session, condition='goal',event_frames=None,n_g
             if condition == 'goal':
                 binned_all, _ = extract_goal_progress(dF, cell, session, frame_rate=frame_rate, bins=bins, plot=False, shuffle=True)
             elif condition == 'arb':
-                binned_all = extract_arb_progress(dF, cell, event_frames, n_goals, bins, plot=False, shuffle=True)
+                binned_all = extract_arb_progress(dF, cell, session, event_frames, n_goals, bins, period=period, plot=False, shuffle=True)
             av_binned = np.nanmean(binned_all, axis=0)
             ngoals = av_binned.shape[0]/bins
             ngoals = int(ngoals)
@@ -1065,7 +1089,7 @@ def cluster_all_corr(dF,plot=False):
     return correlation_all, correlation_sorted
 
 
-def plot_arb_progress_2cells(dF, cell, event_frames, ngoals, bins, stages, labels=None, plot=False, shuffle=False, plot_firing=False):
+def plot_arb_progress_2cells(dF, cell, sessions, event_frames, ngoals, bins, stages, labels=None, plot=False, shuffle=False, plot_firing=False):
 
     """
     Extract the progress tuning between arbitrary events for 2 cells.
@@ -1092,8 +1116,18 @@ def plot_arb_progress_2cells(dF, cell, event_frames, ngoals, bins, stages, label
         binned_phase_firing = np.zeros((len(event_frames[c])-1, bins))
 
         # Create a goal vector 
-        goal_vec = np.arange(ngoals)
-        goal_vec = np.tile(goal_vec, len(event_frames[c])//ngoals)
+        if 'shuffled' in sessions[c]['sequence']:
+            assert ngoals == 2
+            goal_vec = np.empty((len(event_frames[c])), dtype=int)
+            for i in range(len(event_frames[c])):
+                if i in sessions[c]['goal_idx']:
+                    # print(i)
+                    goal_vec[i] = 0
+                elif i in sessions[c]['non_goals_idx']:
+                    goal_vec[i] = 1
+        else:
+            goal_vec = np.arange(ngoals)
+            goal_vec = np.tile(goal_vec, len(event_frames[c])//ngoals)
         goal_vec = goal_vec[:-1]
 
         # Find number of trials per goal 

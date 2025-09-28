@@ -1895,7 +1895,7 @@ def create_templates(peaks=[1,4,5], bins=360, plot=True):
     return templates, peaks
 
 
-def get_goal_progress_cells(dF, neurons, session, event_frames, stage, save_path, ngoals=4, bins=90, reload=False, plot=True, shuffle=False):
+def get_goal_progress_cells(dF, neurons, session, event_frames, stage, save_path, ngoals=4, bins=90, period='goal', reload=False, plot=True, shuffle=False):
     # Find goal progress tuned cells - takes long if shuffling
     filename = f'T{stage}_{ngoals}goal_progress_tracked_neurons.npz'
 
@@ -1906,14 +1906,16 @@ def get_goal_progress_cells(dF, neurons, session, event_frames, stage, save_path
     else:
         goal_progress_tuned = []
         for cell in neurons:
-            real_score, shuffled_scores, phase_pref, state_pref = cellTV.calc_goal_tuningix(dF, cell, session, condition='arb', event_frames=event_frames, n_goals=ngoals, frame_rate=45, bins=bins, shuffle=shuffle, plot=False)
+            real_score, shuffled_scores, phase_pref, state_pref = cellTV.calc_goal_tuningix(dF, cell, session, condition='arb', period=period, event_frames=event_frames, n_goals=ngoals, frame_rate=45, bins=bins, shuffle=shuffle, plot=False)
 
             if (real_score > 1) & (np.abs(real_score - np.median(shuffled_scores)) > 0.5):
                 goal_progress_tuned.append(cell)
 
         # Plot firing rates for goal progress tuned cells
         for cell in goal_progress_tuned:
-            _ = cellTV.extract_arb_progress(dF, cell, event_frames, ngoals=ngoals, bins=90, plot=plot, shuffle=False)
+            _ = cellTV.extract_arb_progress(dF, cell, session, event_frames, ngoals=ngoals, 
+                                            bins=bins, period=period, stage=stage, 
+                                            plot=plot, shuffle=False)
 
         # Save these neurons
         np.savez(os.path.join(save_path, filename), goal_progress_tuned=np.array(goal_progress_tuned))
@@ -2812,8 +2814,8 @@ def plot_lick_maps(session):
         non_goal_lm_lick_rate = session['lm_lick_rate'][session['non_goals_idx']]
 
         min_len = min(len(goal_lm_lick_rate), len(non_goal_lm_lick_rate))
-        goal_lm_lick_rate = goal_lm_lick_rate[:min_len,:]
-        non_goal_lm_lick_rate = non_goal_lm_lick_rate[:min_len,:]
+        goal_lm_lick_rate = goal_lm_lick_rate[:min_len, :]
+        non_goal_lm_lick_rate = non_goal_lm_lick_rate[:min_len, :]
 
         lm_lick_rate = np.column_stack((goal_lm_lick_rate, non_goal_lm_lick_rate))
         
@@ -2952,7 +2954,7 @@ def circular_crosscorr(x, y):
     return corr
 
 
-def get_acg_template_ccg(dF, cell, event_idx, ngoals, templates, plot_firing=True, plot_corr=True):
+def get_acg_template_ccg(dF, cell, session, event_idx, ngoals, templates, plot_firing=True, plot_corr=True):
     """
     Extracts the autocorrelogram of the binned firing rate of a neuron and the 
     crosscorrelogram of the binned firing rate with two templates testing for 
@@ -2961,7 +2963,7 @@ def get_acg_template_ccg(dF, cell, event_idx, ngoals, templates, plot_firing=Tru
     template_size = templates[0].shape[0]
 
     # Extract the firing rate
-    binned_firing_rate = cellTV.extract_arb_progress(dF, cell, event_idx, ngoals=ngoals, bins=90, plot=plot_firing, shuffle=False)
+    binned_firing_rate = cellTV.extract_arb_progress(dF, cell, session, event_idx, ngoals=ngoals, bins=90, plot=plot_firing, shuffle=False)
     avg_binned_firing_rate = np.mean(binned_firing_rate, axis=0)
 
     # Resize firing rate if needed

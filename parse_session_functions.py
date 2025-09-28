@@ -466,18 +466,47 @@ def calc_speed_per_lap(session):
 
 
 def calc_speed_per_lap_pre7(session):
-    bins = 120
     actual_num_laps = np.round((len(session['all_lms']) // session['num_landmarks']) )
 
     _, lm_exit_idx = neural_analysis_helpers.get_lm_entry_exit(session)
     lap_change_idx = lm_exit_idx[session['num_landmarks']-1::session['num_landmarks']]
 
-    speed_per_bin = np.zeros((actual_num_laps, bins))
-
     x = 0
     if '3' in session['stage'] or '4' in session['stage']:
-        print('WIP') # TODO left off here
+        bins = 15
+        binned_lms = []
+        binned_goals = []
+
+        # Calculate and bin speed per lm
+        speed_per_bin = np.zeros((len(session['all_lms']), bins))
+        for i, idx in enumerate(lm_exit_idx):
+            lm_idx = np.arange(x, idx+1)
+
+            speed_per_lm = session['speed'][lm_idx]
+            pos_per_lm = session['position'][lm_idx]
+
+            speed_per_bin[i, :], bin_edges, _ = stats.binned_statistic(pos_per_lm, speed_per_lm, bins=bins)
+            
+            # Bin goals and landmarks
+            if session['goals_idx'][0] == i:
+                binned_goals.append(np.digitize(session['goals'][0], bin_edges))
+            if i <= 1:
+                lm_bin = np.digitize(session['landmarks'][i], bin_edges)
+                lm_bin_shifted = lm_bin + i * bins
+                binned_lms.append(lm_bin_shifted)
+
+            x = idx + 1
+
+        # Split binned speed into goal and non-goal
+        min_len = min(len([session['goals_idx']][0]), len([session['non_goals_idx']][0]))
+        goal_speed = speed_per_bin[session['goals_idx'][:min_len], :]       # (min_len, bins)
+        non_goal_speed = speed_per_bin[session['non_goals_idx'][:min_len], :]  # (min_len, bins)
+        speed_per_bin = np.column_stack((goal_speed, non_goal_speed))    
+
     else:
+        bins = 120
+        speed_per_bin = np.zeros((actual_num_laps, bins))
+
         for i, idx in enumerate(lap_change_idx):
             lap_idx = np.arange(x, idx+1)
 
@@ -486,13 +515,14 @@ def calc_speed_per_lap_pre7(session):
 
             speed_per_bin[i, :], bin_edges, _ = stats.binned_statistic(pos_per_lap, speed_per_lap, bins=bins)
         
+            # TODO remove from loop? 
             goals_per_lap = session['goals'][i * 4 : (i + 1) * 4]
             lms_per_lap = session['landmarks'][i * session['num_landmarks'] : (i + 1) * session['num_landmarks']]
         
             x = idx + 1
 
-    binned_goals = np.digitize(goals_per_lap, bin_edges)
-    binned_lms = np.digitize(lms_per_lap, bin_edges)
+        binned_goals = np.digitize(goals_per_lap, bin_edges)
+        binned_lms = np.digitize(lms_per_lap, bin_edges)
 
     av_speed_per_bin = np.nanmean(speed_per_bin, axis=0)
     std_speed_per_bin = np.nanstd(speed_per_bin, axis=0)
@@ -867,7 +897,10 @@ def plot_speed_profile(session, stage):
     elif stage == 8:
         color = 'red'
 
-    fig, ax = plt.subplots(1,1,figsize=(10,3))
+    if session['num_landmarks'] == 2:
+        fig, ax = plt.subplots(1, 1, figsize=(8,3), sharex=False, sharey=False)
+    else:
+        fig, ax = plt.subplots(1, 1, figsize=(10,3))
     ax.plot(session['speed_per_bin'], color=color)
     ax.fill_between(range(len(session['speed_per_bin'])),
                     session['speed_per_bin'] - session['sem_speed_per_bin'],
