@@ -33,7 +33,7 @@ color_scheme = wesanderson.film_palette('Darjeeling Limited',palette=0)
 custom_cycler = cycler(color=color_scheme)
 
 def find_base_path(mouse,date):
-    data_dir = '/media/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2/' + mouse
+    data_dir = '/Volumes/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2/' + mouse
     folders = [f for f in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, f))]
     sessions = [s for s in folders if date in s]
     if not sessions:
@@ -63,7 +63,7 @@ def find_base_path(mouse,date):
     return base_path
 
 def find_base_path_npz(mouse,date):
-    data_dir = '/media/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2/' + mouse
+    data_dir = '/Volumes/mrsic_flogel/public/projects/AtApSuKuSaRe_20250129_HFScohort2/' + mouse
     folders = [f for f in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, f))]
     sessions = [s for s in folders if date in s]
     base_path = os.path.join(data_dir, sessions[0])
@@ -442,6 +442,112 @@ def sw_state_ratio(session):
     return session
 
 
+def calc_decel_per_lap_pre7(session, dt=1/45):
+    actual_num_laps = np.round((len(session['all_lms']) // session['num_landmarks']))
+    _, lm_exit_idx = neural_analysis_helpers.get_lm_entry_exit(session)
+    lap_change_idx = lm_exit_idx[session['num_landmarks']-1::session['num_landmarks']]
+
+    x = 0
+    if '3' in session['stage'] or '4' in session['stage']:
+        bins = 15
+        binned_lms = []
+        binned_goals = []
+
+        # decel per lm
+        decel_per_bin = np.zeros((len(session['all_lms']), bins))
+        for i, idx in enumerate(lm_exit_idx):
+            lm_idx = np.arange(x, idx+1)
+
+            speed_per_lm = session['speed'][lm_idx]
+            pos_per_lm = session['position'][lm_idx]
+
+            # acceleration (speed derivative / dt)
+            accel = np.gradient(speed_per_lm) / dt
+            # keep only deceleration (negative accel)
+            decel = np.where(accel < 0, accel, np.nan)
+
+            decel_per_bin[i, :], bin_edges, _ = stats.binned_statistic(pos_per_lm, decel, bins=bins)
+            
+            # Bin goals and landmarks (as before)
+            if session['goals_idx'][0] == i:
+                binned_goals.append(np.digitize(session['goals'][0], bin_edges))
+            if i <= 1:
+                lm_bin = np.digitize(session['landmarks'][i], bin_edges)
+                lm_bin_shifted = lm_bin + i * bins
+                binned_lms.append(lm_bin_shifted)
+
+            x = idx + 1
+
+        # Split binned decel into goal and non-goal
+        min_len = min(len([session['goals_idx']][0]), len([session['non_goals_idx']][0]))
+        goal_decel = decel_per_bin[session['goals_idx'][:min_len], :]
+        non_goal_decel = decel_per_bin[session['non_goals_idx'][:min_len], :]
+        decel_per_bin = np.column_stack((goal_decel, non_goal_decel))
+
+    else:
+        bins = 120
+        decel_per_bin = np.zeros((actual_num_laps, bins))
+
+        for i, idx in enumerate(lap_change_idx):
+            lap_idx = np.arange(x, idx+1)
+
+            speed_per_lap = session['speed'][lap_idx]
+            pos_per_lap = session['position'][lap_idx] 
+
+            # acceleration
+            decel = np.gradient(speed_per_lap) / dt
+            # decel = np.where(accel < 0, accel, np.nan)
+
+            decel_per_bin[i, :], bin_edges, _ = stats.binned_statistic(pos_per_lap, decel, bins=bins)
+        
+            x = idx + 1
+
+    av_decel_per_bin = np.nanmean(decel_per_bin, axis=0)
+    std_decel_per_bin = np.nanstd(decel_per_bin, axis=0)
+    sem_decel_per_bin = std_decel_per_bin / np.sqrt(actual_num_laps)
+
+    session['decel_per_bin'] = av_decel_per_bin
+    session['sem_decel_per_bin'] = sem_decel_per_bin
+
+    return session
+
+
+def calc_decel_per_lap(session):
+    bins = 120
+    bin_edges = np.linspace(0, session['position'].max(), bins+1)
+    
+    decel_per_bin = np.zeros((session['num_laps'], bins))
+    
+    for i in range(session['num_laps']):
+        lap_idx = np.where(session['lap_idx'] == i)[0]
+        
+        lap_pos = session['position'][lap_idx]
+        lap_speed = session['speed'][lap_idx]
+        
+        # Acceleration (derivative wrt time or samples)
+        lap_accel = np.gradient(lap_speed, 1/45)
+        
+        # Keep only deceleration values (negative accel)
+        lap_decel = np.where(lap_accel < 0, lap_accel, np.nan)
+        
+        # Bin data by position
+        bin_ix = np.digitize(lap_pos, bin_edges)
+        for j in range(bins):
+            # Average speed per bin
+            # Average deceleration per bin (negative values)
+            decel_per_bin[i, j] = np.nanmean(lap_decel[bin_ix == j])
+    
+    # Across laps: mean and SEM
+    av_decel_per_bin = np.nanmean(decel_per_bin, axis=0)
+    sem_decel_per_bin = np.nanstd(decel_per_bin, axis=0) / np.sqrt(session['num_laps'])
+
+    session['decel_per_bin'] = decel_per_bin
+    session['av_decel_per_bin'] = av_decel_per_bin
+    session['sem_decel_per_bin'] = sem_decel_per_bin
+    
+    return session
+
+
 def calc_speed_per_lap(session):
     bins = 120
     bin_edges = np.linspace(0, session['position'].max(), bins+1)
@@ -534,7 +640,6 @@ def calc_speed_per_lap_pre7(session):
     session['binned_lms'] = binned_lms
 
     return session
-
 
 def calc_speed_per_state(session):
     if session['laps_needed'] == 2:
@@ -896,6 +1001,8 @@ def plot_speed_profile(session, stage):
         color = 'orange'
     elif stage == 8:
         color = 'red'
+    else: 
+        color = 'black'
 
     if session['num_landmarks'] == 2:
         fig, ax = plt.subplots(1, 1, figsize=(8,3), sharex=False, sharey=False)
@@ -913,6 +1020,43 @@ def plot_speed_profile(session, stage):
         ax.add_patch(patches.Rectangle((goal[0],0), np.diff(goal)[0], ax.get_ylim()[1], color='grey', alpha=0.5))
     ax.set_xlabel('Landmark')
     ax.set_ylabel('Speed (cm/s)')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    plt.show()
+
+
+def plot_deceleration_profile(session, stage):
+    import matplotlib.patches as patches
+
+    if stage == 3:
+        color = '#325235'
+    elif stage == 4:
+        color = '#9E664C'
+    elif stage == 5:
+        color = 'blue'
+    elif stage == 6:
+        color = 'orange'
+    elif stage == 8:
+        color = 'red'
+    else: 
+        color = 'black'
+
+    if session['num_landmarks'] == 2:
+        fig, ax = plt.subplots(1, 1, figsize=(8,3), sharex=False, sharey=False)
+    else:
+        fig, ax = plt.subplots(1, 1, figsize=(10,3))
+    ax.plot(session['decel_per_bin'], color=color)
+    ax.fill_between(range(len(session['decel_per_bin'])),
+                    session['decel_per_bin'] - session['sem_decel_per_bin'],
+                    session['decel_per_bin'] + session['sem_decel_per_bin'],
+                    color=color, alpha=0.3)
+
+    for lm in session['binned_lms']:
+        ax.add_patch(patches.Rectangle((lm[0],0), np.diff(lm)[0], ax.get_ylim()[1], color='grey', alpha=0.3))
+    for goal in session['binned_goals']:
+        ax.add_patch(patches.Rectangle((goal[0],0), np.diff(goal)[0], ax.get_ylim()[1], color='grey', alpha=0.5))
+    ax.set_xlabel('Landmark')
+    ax.set_ylabel('Deceleration (cm/s^2)')
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     plt.show()
@@ -1031,6 +1175,13 @@ def analyse_npz_pre7(mouse,date,stage,plot=False):
     # session = sw_state_ratio(session)
     session = calc_speed_per_lap_pre7(session)
     # session = calc_speed_per_state(session)
+
+    # Get lick profile 
+    neural_analysis_helpers.plot_lick_maps(session)
+
+    # Get speed profile
+    stage = int(stage[-1])
+    plot_speed_profile(session, stage=stage)
 
     # print('Performance = ', np.nanmean(session['sw_state_ratio'][11:]))
     print('Number of laps = ', session['num_laps'])

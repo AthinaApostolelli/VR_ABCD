@@ -13,12 +13,53 @@ import itertools
 import seaborn as sns
 import palettes
 import importlib
+from pathlib import Path
 
 import parse_session_functions
 import cellTV_functions as cellTV
 
 importlib.reload(parse_session_functions)
 importlib.reload(cellTV)
+
+def load_dF_session_data(base_path, mouse, stage, calculate_DF_F=False):
+    session_folder = [f for f in os.listdir(os.path.join(base_path, mouse)) if stage in f][0]
+    sess_data_path = os.path.join(base_path, mouse, session_folder)
+
+    imaging_path, config_path, frame_ix, date1, date2 = cellTV.get_session_folders(base_path, mouse, stage)
+
+    save_path = Path(sess_data_path) / 'analysis'
+    save_path.mkdir(parents=True, exist_ok=True)
+
+    # Load or calculate dF/F0
+    DF_F_file = os.path.join(imaging_path, 'DF_F0.npy')
+
+    if os.path.exists(DF_F_file) and calculate_DF_F is False:
+        print('DF_F0 file found. Loading...')
+        
+        DF_F_all = np.load(DF_F_file)
+        dF = DF_F_all[:, frame_ix['valid_frames']]
+        print(dF.shape)
+        
+    else:
+        DF_F_file = os.path.join(imaging_path, 'DF_F0_valid_frames.npy')
+        if os.path.exists(DF_F_file):
+            print('DF_F0 file with valid frames found. Loading...')
+            dF = np.load(DF_F_file)
+        else:
+            # TODO: incorporate this into the main analysis and ensure DF_F is the same everywhere
+            f, fneu, iscell, ops, seg, frame_rate = cellTV.load_img_data(imaging_path)
+            dF = cellTV.get_dff(f, fneu, frame_ix, ops)
+
+            np.save(DF_F_file, dF)
+            
+    # Get session data 
+    if stage in ['-t3','-t4','-t5', '-t6']:
+        session = parse_session_functions.analyse_npz_pre7(mouse, date2, stage=stage, plot=False)
+    else:
+        session = parse_session_functions.analyse_npz(mouse, date2, plot=True)
+
+    return save_path, dF, session
+
 
 def get_psth(data, neurons, event_idx, time_around=(-1, 3), funcimg_frame_rate=45):
     num_neurons = len(neurons)
@@ -238,7 +279,7 @@ def get_tuned_neurons(psth, event='reward', time_around=1, funcimg_frame_rate=45
 
     # Criteria to define tuned neurons
     # 1. p-value
-    criterion1 = np.where(wilcoxon_pval < 0.05)[0]   
+    criterion1 = np.where(wilcoxon_pval < 0.001)[0]   
 
     # 2. peak in the 1s after event > mean + 2*std of the 1s before the event
     average_psth = np.mean(psth, axis=1)
@@ -251,17 +292,18 @@ def get_tuned_neurons(psth, event='reward', time_around=1, funcimg_frame_rate=45
 
     # Plot firing for a few significant neurons
     if plot_neurons:
-        for n in tuned_neurons[0:10]:
+        for n in tuned_neurons[0:20]:
             fig, ax = plt.subplots(1, 1, figsize=(2,2), sharey=True)
             ax.plot(average_psth[n, :])      
             event_frame = -start_frames  
-            ax.plot(average_psth[n, :])      
+            # ax.plot(average_psth[n, :])      
             ax.axvspan(event_frame, event_frame + end_frames, color='gray', alpha=0.5)
             ax.set_xlabel('Time')
             ax.set_xticks([event_frame + start_frames, event_frame, event_frame + end_frames])
             ax.set_xticklabels([start_time, 0, end_time])
             ax.spines[['right', 'top']].set_visible(False)
             ax.set_ylabel('DF/F')
+            ax.set_title(f'p-value {wilcoxon_pval[n]}')
 
     return tuned_neurons, wilcoxon_stat, wilcoxon_pval
 
@@ -1807,16 +1849,35 @@ def get_high_peak_tuned_cells(dF, goal_firing, event_idx, session_idx, neurons, 
     return high_test_goal_cells
 
 
-def plot_arb_progress(dF, cell, event_frames, ngoals, bins, stage, labels=None, ax=None):
+def plot_arb_progress(dF, cell, event_frames, ngoals, bins, stage, session, period='goal', labels=None, ax=None):
     """
     Extract the progress tuning between arbitrary events.
     If ax1/ax2 are given, plot into them. Otherwise, create a new figure.
     """
     dF_cell = cellTV.extract_cell_trace(dF, cell, plot=False)
     binned_phase_firing = np.zeros((len(event_frames)-1, bins))
-    goal_vec = np.arange(ngoals)
-    goal_vec = np.tile(goal_vec, len(event_frames)//ngoals)
+
+    # Create a goal vector 
+    if period == 'goal':
+        # Events are organised based on whether they are a goal or not
+        if ('shuffled' in session['sequence']):
+            assert ngoals == 2
+            goal_vec = np.empty((len(event_frames)), dtype=int)
+            for i in range(len(event_frames)):
+                if i in session['goals_idx']:
+                    goal_vec[i] = 0
+                elif i in session['non_goals_idx']:
+                    goal_vec[i] = 1
+        else:
+            goal_vec = np.arange(ngoals)
+            goal_vec = np.tile(goal_vec, len(event_frames)//ngoals) 
+
+    elif period == 'landmark':
+        # Events are organised based on the order in which they occur
+        goal_vec = np.arange(ngoals)
+        goal_vec = np.tile(goal_vec, len(event_frames)//ngoals)  
     goal_vec = goal_vec[:-1]
+    
     num_trials = np.array([np.sum(goal_vec == i) for i in range(ngoals)])
     max_trials = np.max(num_trials)
 
@@ -1840,12 +1901,20 @@ def plot_arb_progress(dF, cell, event_frames, ngoals, bins, stage, labels=None, 
     std_bin = np.nanstd(binned_all, axis=0)
     sem_bin = std_bin / np.sqrt(binned_all.shape[0])
 
-    if stage == 6:
+    if stage == 3:
+        color = '#325235'
+    elif stage == 4:
+        color = '#9E664C'
+    elif stage == 5:
+        color = 'blue'
+    elif stage == 6:
         color = 'orange'
     elif stage == 8:
         color = 'red'
+    elif stage == 12:
+        color = 'teal'
     else:
-        color = 'blue'
+        color = 'gray'
 
     if ax is None:
         fig = plt.figure(figsize=(10, 5))
@@ -1864,6 +1933,8 @@ def plot_arb_progress(dF, cell, event_frames, ngoals, bins, stage, labels=None, 
     ax.plot(angles[bins*(ngoals-1):], avg_bin[bins*(ngoals-1):], color=color, linewidth=2)
     ax.fill_between(angles, avg_bin - sem_bin, avg_bin + sem_bin, color=color, alpha=0.2)
     ax.set_xticks(np.linspace(0, 2 * np.pi, ngoals, endpoint=False))
+    # if ngoals == 10:
+    #     ax.set_xticklabels([])    
     ax.set_rticks([np.round(np.min(avg_bin),1), np.round(np.max(avg_bin),1)])
     if labels is None:
         ax.set_title(f'T{stage} Cell {cell}')
@@ -1911,8 +1982,12 @@ def get_goal_progress_cells(dF, neurons, session, event_frames, stage, save_path
         for cell in neurons:
             real_score, shuffled_scores, phase_pref, state_pref = cellTV.calc_goal_tuningix(dF, cell, session, condition='arb', period=period, event_frames=event_frames, n_goals=ngoals, frame_rate=45, bins=bins, shuffle=shuffle, plot=False)
 
-            if (real_score > 1) & (np.abs(real_score - np.median(shuffled_scores)) > 0.5):
-                goal_progress_tuned.append(cell)
+            if 'shuffled' in session['sequence']:
+                if real_score - np.median(shuffled_scores) > 0.07:
+                    goal_progress_tuned.append(cell)
+            else:
+                if (real_score > 1) & (np.abs(real_score - np.median(shuffled_scores)) > 0.5):
+                    goal_progress_tuned.append(cell)
 
         # Plot firing rates for goal progress tuned cells
         for cell in goal_progress_tuned:
@@ -2801,7 +2876,8 @@ def plot_lick_maps(session):
         binary_licked_lms = np.column_stack((goal_licked_lms, non_goal_licked_lms))
     else: 
         # the landmarks are in order so we can simply reshape
-        binary_licked_lms = np.array(session['binary_licked_lms'][0][:num_lms_considered]).reshape((num_laps, session['num_landmarks']))
+        # binary_licked_lms = np.array(session['binary_licked_lms'][0][:num_lms_considered]).reshape((num_laps, session['num_landmarks']))
+        binary_licked_lms = np.array(session['binary_licked_lms'][:num_lms_considered]).reshape((num_laps, session['num_landmarks']))
     
         # else:
         #     # binary_licked_lms = np.array(session['binary_licked_lms'][0])

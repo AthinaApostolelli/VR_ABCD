@@ -840,7 +840,7 @@ def extract_arb_progress(dF, cell, session, event_frames, ngoals, bins, period='
 
     if period == 'goal':
         # Events are organised based on whether they are a goal or not
-        if ('shuffled' in session['sequence']):
+        if 'sequence' in session and 'shuffled' in session['sequence']:
             assert ngoals == 2
             goal_vec = np.empty((len(event_frames)), dtype=int)
             for i in range(len(event_frames)):
@@ -874,7 +874,7 @@ def extract_arb_progress(dF, cell, session, event_frames, ngoals, bins, period='
         for j in range(bins):
             binned_phase_firing[i,j] = np.mean(phase_firing[bin_ix == j+1])
 
-    binned_segment = np.zeros((ngoals, max_trials,binned_phase_firing.shape[1]))
+    binned_segment = np.zeros((ngoals, max_trials, binned_phase_firing.shape[1]))
     for i in range(ngoals):
         if num_trials[i] < max_trials:
             binned_segment[i, :num_trials[i], :] = binned_phase_firing[np.where(goal_vec == i)[0], :]
@@ -898,8 +898,10 @@ def extract_arb_progress(dF, cell, session, event_frames, ngoals, bins, period='
             color = 'orange'
         elif stage == 8:
             color = 'red'
+        elif stage == 12:
+            color = 'teal'
         else:
-            color = 'blue'
+            color = 'gray'
 
         fig = plt.figure(figsize=(10, 5))
         ax1 = fig.add_subplot(121, projection='polar')
@@ -1089,7 +1091,7 @@ def cluster_all_corr(dF,plot=False):
     return correlation_all, correlation_sorted
 
 
-def plot_arb_progress_2cells(dF, cell, sessions, event_frames, ngoals, bins, stages, labels=None, plot=False, shuffle=False, plot_firing=False):
+def plot_arb_progress_2cells(dF, cell, sessions, event_frames, ngoals, bins, stages, period='goal', labels=None, plot=False, shuffle=False, plot_firing=False, plot_speed_limit=False):
 
     """
     Extract the progress tuning between arbitrary events for 2 cells.
@@ -1099,36 +1101,41 @@ def plot_arb_progress_2cells(dF, cell, sessions, event_frames, ngoals, bins, sta
     std_bin = []
     sem_bin = []
 
-    fake_neuron = False
+    # Check if data are from cell or fake neuron (lick rate)
+    fake_neurons = [c for c in range(len(dF)) if dF[c].shape[0] == 1]
 
     for c in range(2):
-        # Check if data are from cell or fake neuron (firing rate)
-        if dF[c].shape[0] == 1:
-            fake_neuron = True
-
         # Extract the neural activity trace
         dF_cell = extract_cell_trace(dF[c], cell[c], plot=False)
         
         # z-score to remove differences across sessions 
-        dF_cell = stats.zscore(dF_cell)
+        if not all(s == stages[0] for s in stages):
+            dF_cell = stats.zscore(dF_cell)
         
-        # Bin the firing
+        # Bin the activity
         binned_phase_firing = np.zeros((len(event_frames[c])-1, bins))
 
         # Create a goal vector 
-        if 'shuffled' in sessions[c]['sequence']:
-            assert ngoals == 2
-            goal_vec = np.empty((len(event_frames[c])), dtype=int)
-            for i in range(len(event_frames[c])):
-                if i in sessions[c]['goals_idx']:
-                    goal_vec[i] = 0
-                elif i in sessions[c]['non_goals_idx']:
-                    goal_vec[i] = 1
-        else:
-            goal_vec = np.arange(ngoals)
-            goal_vec = np.tile(goal_vec, len(event_frames[c])//ngoals)
-        goal_vec = goal_vec[:-1]
+        if period == 'goal':
+            # Events are organised based on whether they are a goal or not
+            if ('shuffled' in sessions[c]['sequence']):
+                assert ngoals == 2
+                goal_vec = np.empty((len(event_frames[c])), dtype=int)
+                for i in range(len(event_frames[c])):
+                    if i in sessions[c]['goals_idx']:
+                        goal_vec[i] = 0
+                    elif i in sessions[c]['non_goals_idx']:
+                        goal_vec[i] = 1
+            else:
+                goal_vec = np.arange(ngoals)
+                goal_vec = np.tile(goal_vec, len(event_frames[c])//ngoals) 
 
+        elif period == 'landmark':
+            # Events are organised based on the order in which they occur
+            goal_vec = np.arange(ngoals)
+            goal_vec = np.tile(goal_vec, len(event_frames[c])//ngoals)  
+        goal_vec = goal_vec[:-1]
+        
         # Find number of trials per goal 
         num_trials = np.zeros(ngoals)
         for i in range(ngoals):
@@ -1213,33 +1220,63 @@ def plot_arb_progress_2cells(dF, cell, sessions, event_frames, ngoals, bins, sta
         ax1.set_theta_zero_location('N')
         ax1.set_theta_direction(-1)
         angles = np.linspace(0, 2 * np.pi, bins*ngoals, endpoint=False)
-        # add the first angle to close the circle
-        angles = np.concatenate((angles, [angles[0]]))
+        angles = np.concatenate((angles, [angles[0]])) # add the first angle to close the circle
         
         for s in range(len(stages)):
             avg_bin[s] = np.concatenate((avg_bin[s], [avg_bin[s][0]]))
             sem_bin[s] = np.concatenate((sem_bin[s], [sem_bin[s][0]]))
             
-            stage_max = np.max(avg_bin[s])  
-            avg_bin[s] = avg_bin[s] / stage_max
-            sem_bin[s] = sem_bin[s] / stage_max
+            if not len(fake_neurons) == len(cell):
+                stage_max = np.max(avg_bin[s])  
+                avg_bin[s] = avg_bin[s] / stage_max
+                sem_bin[s] = sem_bin[s] / stage_max
 
             ax1.plot(angles, avg_bin[s], color=colors[s], linewidth=2)
             ax1.fill_between(angles, avg_bin[s] - sem_bin[s], avg_bin[s] + sem_bin[s], color=colors[s], alpha=0.5, label=labels[s])
-         
-        #label the cardinal directions
+            
+        # label the cardinal directions
         ax1.set_xticks(np.linspace(0, 2 * np.pi, ngoals, endpoint=False))
-        if fake_neuron:
-            ax1.set_title(f'Cell {cell[0]} - Average Firing Rate (Polar)')
+        if len(fake_neurons) == len(cell):
+            ax1.set_title("Lick Rate and Speed (Polar)")
+
+            if plot_speed_limit:
+                ax1.plot(angles, np.full_like(angles, sessions[0]['lick_threshold']), 
+                    color='black', linestyle='--', linewidth=1.5, label='speed threshold')
+         
+        elif len(fake_neurons) > 0:
+            real_idx = [i for i in range(len(cell)) if i not in fake_neurons][0]  # first non-fake idx
+            ax1.set_title(f'Cell {cell[real_idx]} - Average Firing Rate (Polar)')
         else:
-            ax1.set_title(f'Cell {cell} - Average Firing Rate (Polar)')
+            ax1.set_title(f'Cells {cell} - Average Firing Rate (Polar)')
 
         plt.legend(loc='upper right')
 
         if plot_firing: 
             ax2 = fig.add_subplot(122)
             cax = ax2.imshow(binned_all[0], aspect='auto', cmap='viridis', interpolation='none')
-            ax2.set_title(f'Cell {cell} - Binned Firing Rates')
+            ax2.set_yticks([0, len(binned_all[0])-1])
+            ax2.set_yticklabels([0, len(binned_all[0])])
+            ax2.set_ylabel('Lap')
+            
+            if stages[0] == 3 or stages[0] == 4:
+                xtick_positions = [i * bins + bins // 2 for i in range(ngoals)]
+                ax2.set_xlabel('Landmark')
+                ax2.set_xticks(xtick_positions)
+                ax2.set_xticklabels(['A', 'B'])
+            elif stages[0] == 5 or stages[0] == 6:
+                xtick_positions = [i * bins for i in range(ngoals)]
+                ax2.set_xlabel('Goal')
+                ax2.set_xticks(xtick_positions)
+                ax2.set_xticklabels(['A', 'B', 'C', 'D', 'test'])
+
+            if len(fake_neurons) == len(cell):
+                ax2.set_title("Binned Lick Rate and Speed (Polar)")
+            elif len(fake_neurons) > 0:
+                real_idx = [i for i in range(len(cell)) if i not in fake_neurons][0]  # first non-fake idx
+                ax2.set_title(f'Cell {cell[real_idx]} - Binned Firing Rate')
+            else:
+                ax2.set_title(f'Cells {cell} - Binned Firing Rate')
+
             plt.colorbar(cax, ax=ax2, label='dF/F')
 
         plt.tight_layout()
