@@ -4,6 +4,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import h5py
 from scipy.signal import find_peaks
+from sklearn.preprocessing import normalize
+
 from barcode import barcode_util
 from barcode import extract_barcodes
 import pickle
@@ -781,15 +783,33 @@ def extract_goal_progress(dF,cell,session,frame_rate = 45,bins=90,plot=False,shu
         plt.tight_layout()
     return binned_all, reward_ix
 
-def extract_arb_progress(dF, cell, event_frames, ngoals, bins, plot=False,shuffle=False):
+def extract_arb_progress(dF, cell, session, event_frames, ngoals, bins, period='goal', stage=None, plot=False, shuffle=False):
     """
     Extract the progress tuning between arbitrary events.
     """
     dF_cell = extract_cell_trace(dF, cell, plot=False)
     binned_phase_firing = np.zeros((len(event_frames)-1, bins))
-    goal_vec = np.arange(ngoals)
-    goal_vec = np.tile(goal_vec, len(event_frames)//ngoals)
+
+    if period == 'goal':
+        # Events are organised based on whether they are a goal or not
+        if 'sequence' in session and 'shuffled' in session['sequence']:
+            assert ngoals == 2
+            goal_vec = np.empty((len(event_frames)), dtype=int)
+            for i in range(len(event_frames)):
+                if i in session['goals_idx']:
+                    goal_vec[i] = 0
+                elif i in session['non_goals_idx']:
+                    goal_vec[i] = 1
+        else:
+            goal_vec = np.arange(ngoals)
+            goal_vec = np.tile(goal_vec, len(event_frames)//ngoals) 
+
+    elif period == 'landmark':
+        # Events are organised based on the order in which they occur
+        goal_vec = np.arange(ngoals)
+        goal_vec = np.tile(goal_vec, len(event_frames)//ngoals)  
     goal_vec = goal_vec[:-1]
+
     num_trials = np.zeros(ngoals)
     for i in range(ngoals):
         num_trials[i] = np.sum(goal_vec == i)
@@ -806,7 +826,7 @@ def extract_arb_progress(dF, cell, event_frames, ngoals, bins, plot=False,shuffl
         for j in range(bins):
             binned_phase_firing[i,j] = np.mean(phase_firing[bin_ix == j+1])
 
-    binned_segment = np.zeros((ngoals, max_trials,binned_phase_firing.shape[1]))
+    binned_segment = np.zeros((ngoals, max_trials, binned_phase_firing.shape[1]))
     for i in range(ngoals):
         if num_trials[i] < max_trials:
             binned_segment[i, :num_trials[i], :] = binned_phase_firing[np.where(goal_vec == i)[0], :]
@@ -820,6 +840,21 @@ def extract_arb_progress(dF, cell, event_frames, ngoals, bins, plot=False,shuffl
     sem_bin = std_bin / np.sqrt(binned_all.shape[0])
 
     if plot:
+        if stage == 3:
+            color = '#325235'
+        elif stage == 4:
+            color = '#9E664C'
+        elif stage == 5:
+            color = 'blue'
+        elif stage == 6:
+            color = 'orange'
+        elif stage == 8:
+            color = 'red'
+        elif stage == 12:
+            color = 'teal'
+        else:
+            color = 'gray'
+
         fig = plt.figure(figsize=(10, 5))
         ax1 = fig.add_subplot(121, projection='polar')
         ax1.set_theta_zero_location('N')
@@ -829,8 +864,8 @@ def extract_arb_progress(dF, cell, event_frames, ngoals, bins, plot=False,shuffl
         angles = np.concatenate((angles, [angles[0]]))
         avg_bin = np.concatenate((avg_bin, [avg_bin[0]]))
         sem_bin = np.concatenate((sem_bin, [sem_bin[0]]))
-        ax1.plot(angles, avg_bin, color='blue', linewidth=2)
-        ax1.fill_between(angles, avg_bin - sem_bin, avg_bin + sem_bin, color='blue', alpha=0.2)
+        ax1.plot(angles, avg_bin, color=color, linewidth=2)
+        ax1.fill_between(angles, avg_bin - sem_bin, avg_bin + sem_bin, color=color, alpha=0.2)
         #label the cardinal directions
         ax1.set_xticks(np.linspace(0, 2 * np.pi, ngoals, endpoint=False))
         ax1.set_title(f'Cell {cell} - Average Firing Rate (Polar)')
@@ -842,7 +877,7 @@ def extract_arb_progress(dF, cell, event_frames, ngoals, bins, plot=False,shuffl
 
     return binned_all
 
-def calc_goal_tuningix(dF, cell, session, condition='goal',event_frames=None,n_goals=4, frame_rate=45, bins=90, shuffle=True,plot=False):
+def calc_goal_tuningix(dF, cell, session, condition='goal', period='goal', event_frames=None, n_goals=4, frame_rate=45, bins=90, shuffle=True, plot=False):
 
     """
     Calculate the goal tuning index for a specific cell by comparing the real score to shuffled scores.
@@ -851,7 +886,7 @@ def calc_goal_tuningix(dF, cell, session, condition='goal',event_frames=None,n_g
     if condition == 'goal':
         binned_all, _ = extract_goal_progress(dF, cell, session, frame_rate=frame_rate, bins=bins, plot=False, shuffle=False)
     elif condition == 'arb':
-        binned_all = extract_arb_progress(dF, cell, event_frames, n_goals, bins, plot=False, shuffle=False)
+        binned_all = extract_arb_progress(dF, cell, session, event_frames, n_goals, bins, period=period, plot=False, shuffle=False)
 
     av_binned = np.nanmean(binned_all, axis=0)
     ngoals = av_binned.shape[0]/bins
@@ -880,7 +915,7 @@ def calc_goal_tuningix(dF, cell, session, condition='goal',event_frames=None,n_g
             if condition == 'goal':
                 binned_all, _ = extract_goal_progress(dF, cell, session, frame_rate=frame_rate, bins=bins, plot=False, shuffle=True)
             elif condition == 'arb':
-                binned_all = extract_arb_progress(dF, cell, event_frames, n_goals, bins, plot=False, shuffle=True)
+                binned_all = extract_arb_progress(dF, cell, session, event_frames, n_goals, bins, period=period, plot=False, shuffle=True)
             av_binned = np.nanmean(binned_all, axis=0)
             ngoals = av_binned.shape[0]/bins
             ngoals = int(ngoals)
@@ -1006,3 +1041,196 @@ def cluster_all_corr(dF,plot=False):
         plt.tight_layout()
 
     return correlation_all, correlation_sorted
+
+
+def plot_arb_progress_2cells(dF, cell, sessions, event_frames, ngoals, bins, stages, period='goal', labels=None, plot=False, shuffle=False, plot_firing=False, plot_speed_limit=False):
+
+    """
+    Extract the progress tuning between arbitrary events for 2 cells.
+    """
+    binned_all = []
+    avg_bin = []
+    std_bin = []
+    sem_bin = []
+
+    # Check if data are from cell or fake neuron (lick rate)
+    fake_neurons = [c for c in range(len(dF)) if dF[c].shape[0] == 1]
+
+    for c in range(2):
+        # Extract the neural activity trace
+        dF_cell = extract_cell_trace(dF[c], cell[c], plot=False)
+        
+        # z-score to remove differences across sessions 
+        if not all(s == stages[0] for s in stages):
+            dF_cell = stats.zscore(dF_cell)
+        
+        # Bin the activity
+        binned_phase_firing = np.zeros((len(event_frames[c])-1, bins))
+
+        # Create a goal vector 
+        if period == 'goal':
+            # Events are organised based on whether they are a goal or not
+            if ('shuffled' in sessions[c]['sequence']):
+                assert ngoals == 2
+                goal_vec = np.empty((len(event_frames[c])), dtype=int)
+                for i in range(len(event_frames[c])):
+                    if i in sessions[c]['goals_idx']:
+                        goal_vec[i] = 0
+                    elif i in sessions[c]['non_goals_idx']:
+                        goal_vec[i] = 1
+            else:
+                goal_vec = np.arange(ngoals)
+                goal_vec = np.tile(goal_vec, len(event_frames[c])//ngoals) 
+
+        elif period == 'landmark':
+            # Events are organised based on the order in which they occur
+            goal_vec = np.arange(ngoals)
+            goal_vec = np.tile(goal_vec, len(event_frames[c])//ngoals)  
+        goal_vec = goal_vec[:-1]
+        
+        # Find number of trials per goal 
+        num_trials = np.zeros(ngoals)
+        for i in range(ngoals):
+            num_trials[i] = np.sum(goal_vec == i)
+        num_trials = num_trials.astype(int)
+        max_trials = np.max(num_trials)
+
+        # Bin firing between events
+        for i in range(len(event_frames[c])-1):
+            phase_frames = np.arange(event_frames[c][i], event_frames[c][i+1])
+            bin_edges = np.linspace(event_frames[c][i], event_frames[c][i+1], bins+1)
+            phase_firing = dF_cell[phase_frames]
+            if shuffle:
+                np.random.shuffle(phase_firing)
+            bin_ix = np.digitize(phase_frames, bin_edges)
+            for j in range(bins):
+                binned_phase_firing[i,j] = np.mean(phase_firing[bin_ix == j+1])
+
+        # Get binned phase firing per goal
+        binned_segment = np.zeros((ngoals, max_trials, binned_phase_firing.shape[1]))
+
+        for i in range(ngoals):
+            if num_trials[i] < max_trials:
+                binned_segment[i, :num_trials[i], :] = binned_phase_firing[np.where(goal_vec == i)[0], :]
+            else:
+                binned_segment[i] = binned_phase_firing[np.where(goal_vec == i)[0], :]
+        min_state = np.min([binned_segment[i].shape[0] for i in range(ngoals)], axis=0)
+        binned_all.append(np.concatenate([binned_segment[i][:min_state,:] for i in range(ngoals)], axis=1))
+
+        avg_bin.append(np.nanmean(binned_all[c], axis=0))
+        std_bin.append(np.nanstd(binned_all[c], axis=0))
+        sem_bin.append(std_bin[c] / np.sqrt(binned_all[c].shape[0]))
+
+    if plot:
+        cell = np.array(cell).astype(int)
+
+        # Define colors 
+        colors = np.empty(len(stages), dtype=object)
+        
+        if all(s == stages[0] for s in stages):
+            
+            if stages[0] == 3:
+                colors[0] = '#325235'
+                colors[1] = '#6AC272'
+            elif stages[0] == 4:
+                colors[0] = '#9E664C'
+                colors[1] = '#E68558'
+            elif stages[0] == 5:
+                colors[0] = 'blue'
+                colors[1] = 'deepskyblue'
+            elif stages[0] == 6:
+                colors[0] = 'orange'
+                colors[1] = 'gold'
+            elif stages[0] == 8:
+                colors[0] = 'red'
+                colors[1] = 'tomato'
+
+            if labels is None:
+                labels = np.empty(len(stages), dtype=object)
+                labels[0] = f'T{stages[0]} - rewards'
+                labels[1] = f'T{stages[1]} - licks'
+        else:
+            for i, s in enumerate(stages):
+                if s == 5:
+                    colors[i] = 'blue'
+                elif s == 6:
+                    colors[i] = 'orange'
+                elif s == 8:
+                    colors[i] = 'red'
+            if labels is None:
+                labels = np.empty(len(stages), dtype=object)
+                for i, s in enumerate(stages):
+                    labels[i] = f'T{stages[i]} - cell {cell[i]}'
+
+        # Plot
+        fig = plt.figure(figsize=(10, 5))
+        
+        if not plot_firing:
+            ax1 = fig.add_subplot(111, projection='polar')
+        else:
+            ax1 = fig.add_subplot(121, projection='polar')
+        ax1.set_theta_zero_location('N')
+        ax1.set_theta_direction(-1)
+        angles = np.linspace(0, 2 * np.pi, bins*ngoals, endpoint=False)
+        angles = np.concatenate((angles, [angles[0]])) # add the first angle to close the circle
+        
+        for s in range(len(stages)):
+            avg_bin[s] = np.concatenate((avg_bin[s], [avg_bin[s][0]]))
+            sem_bin[s] = np.concatenate((sem_bin[s], [sem_bin[s][0]]))
+            
+            if not len(fake_neurons) == len(cell):
+                stage_max = np.max(avg_bin[s])  
+                avg_bin[s] = avg_bin[s] / stage_max
+                sem_bin[s] = sem_bin[s] / stage_max
+
+            ax1.plot(angles, avg_bin[s], color=colors[s], linewidth=2)
+            ax1.fill_between(angles, avg_bin[s] - sem_bin[s], avg_bin[s] + sem_bin[s], color=colors[s], alpha=0.5, label=labels[s])
+            
+        # label the cardinal directions
+        ax1.set_xticks(np.linspace(0, 2 * np.pi, ngoals, endpoint=False))
+        if len(fake_neurons) == len(cell):
+            ax1.set_title("Lick Rate and Speed (Polar)")
+
+            if plot_speed_limit:
+                ax1.plot(angles, np.full_like(angles, sessions[0]['lick_threshold']), 
+                    color='black', linestyle='--', linewidth=1.5, label='speed threshold')
+         
+        elif len(fake_neurons) > 0:
+            real_idx = [i for i in range(len(cell)) if i not in fake_neurons][0]  # first non-fake idx
+            ax1.set_title(f'Cell {cell[real_idx]} - Average Firing Rate (Polar)')
+        else:
+            ax1.set_title(f'Cells {cell} - Average Firing Rate (Polar)')
+
+        plt.legend(loc='upper right')
+
+        if plot_firing: 
+            ax2 = fig.add_subplot(122)
+            cax = ax2.imshow(binned_all[0], aspect='auto', cmap='viridis', interpolation='none')
+            ax2.set_yticks([0, len(binned_all[0])-1])
+            ax2.set_yticklabels([0, len(binned_all[0])])
+            ax2.set_ylabel('Lap')
+            
+            if stages[0] == 3 or stages[0] == 4:
+                xtick_positions = [i * bins + bins // 2 for i in range(ngoals)]
+                ax2.set_xlabel('Landmark')
+                ax2.set_xticks(xtick_positions)
+                ax2.set_xticklabels(['A', 'B'])
+            elif stages[0] == 5 or stages[0] == 6:
+                xtick_positions = [i * bins for i in range(ngoals)]
+                ax2.set_xlabel('Goal')
+                ax2.set_xticks(xtick_positions)
+                ax2.set_xticklabels(['A', 'B', 'C', 'D', 'test'])
+
+            if len(fake_neurons) == len(cell):
+                ax2.set_title("Binned Lick Rate and Speed (Polar)")
+            elif len(fake_neurons) > 0:
+                real_idx = [i for i in range(len(cell)) if i not in fake_neurons][0]  # first non-fake idx
+                ax2.set_title(f'Cell {cell[real_idx]} - Binned Firing Rate')
+            else:
+                ax2.set_title(f'Cells {cell} - Binned Firing Rate')
+
+            plt.colorbar(cax, ax=ax2, label='dF/F')
+
+        plt.tight_layout()
+
+    return binned_all
