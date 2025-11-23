@@ -1070,7 +1070,7 @@ def plot_arb_progress_2cells(dF, cell, sessions, event_frames, ngoals, bins, sta
         # Create a goal vector 
         if period == 'goal':
             # Events are organised based on whether they are a goal or not
-            if ('shuffled' in sessions[c]['sequence']):
+            if stages[c] < 7 and ('shuffled' in sessions[c]['sequence']):
                 assert ngoals == 2
                 goal_vec = np.empty((len(event_frames[c])), dtype=int)
                 for i in range(len(event_frames[c])):
@@ -1081,7 +1081,7 @@ def plot_arb_progress_2cells(dF, cell, sessions, event_frames, ngoals, bins, sta
             else:
                 goal_vec = np.arange(ngoals)
                 goal_vec = np.tile(goal_vec, len(event_frames[c])//ngoals) 
-
+            
         elif period == 'landmark':
             # Events are organised based on the order in which they occur
             goal_vec = np.arange(ngoals)
@@ -1097,7 +1097,7 @@ def plot_arb_progress_2cells(dF, cell, sessions, event_frames, ngoals, bins, sta
 
         # Bin firing between events
         for i in range(len(event_frames[c])-1):
-            phase_frames = np.arange(event_frames[c][i], event_frames[c][i+1])
+            phase_frames = np.arange(event_frames[c][i], event_frames[c][i+1]).astype(int)
             bin_edges = np.linspace(event_frames[c][i], event_frames[c][i+1], bins+1)
             phase_firing = dF_cell[phase_frames]
             if shuffle:
