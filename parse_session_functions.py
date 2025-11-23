@@ -238,13 +238,19 @@ def calculate_lick_rate(session):
 
 def get_licks_per_lap(session):
     #save lick indices for each lap in a dictionary
+    lick_frames = {}
     lick_positions = {}
     for i in range(session['num_laps']):
-        lap_ix = np.where(session['lap_idx'] == i)[0]
+        if session['num_laps'] == 1:
+            lap_ix = np.where(session['lap_idx'] == i+1)[0]
+        else:
+            lap_ix = np.where(session['lap_idx'] == i)[0]
         licks_per_lap_ix = np.intersect1d(lap_ix,session['thresholded_licks'])
+        lick_frames[i] = licks_per_lap_ix
         lick_positions[i] = session['position'][licks_per_lap_ix]
 
     session['licks_per_lap'] = lick_positions
+    session['licks_per_lap_frames'] = lick_frames
 
     return session
 
@@ -1172,9 +1178,7 @@ def analyse_npz_pre7(mouse,date,stage,plot=False):
     session = calc_laps_needed(session)
     session = give_lap_state_id(session)
     session = plot_licks_per_state(session)
-    # session = sw_state_ratio(session)
     session = calc_speed_per_lap_pre7(session)
-    # session = calc_speed_per_state(session)
 
     # Get lick profile 
     neural_analysis_helpers.plot_lick_maps(session)
@@ -1183,7 +1187,6 @@ def analyse_npz_pre7(mouse,date,stage,plot=False):
     stage = int(stage[-1])
     plot_speed_profile(session, stage=stage)
 
-    # print('Performance = ', np.nanmean(session['sw_state_ratio'][11:]))
     print('Number of laps = ', session['num_laps'])
     
     if plot:

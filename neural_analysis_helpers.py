@@ -16,7 +16,7 @@ import importlib
 from pathlib import Path
 
 import parse_session_functions
-import cellTV_functions as cellTV
+import cellTV_functions_cohort2 as cellTV
 
 importlib.reload(parse_session_functions)
 importlib.reload(cellTV)
@@ -1758,9 +1758,12 @@ def get_test_peak_tuned_cells(dF, goal_firing, event_idx, session_idx, neurons, 
                             if add_lick_rate:
                                 dF_lick = np.array(session['frame_lick_rate']).reshape(1, -1)
 
-                                cellTV.plot_arb_progress_2cells(dF=[dF, dF_lick], cell=[cell, 0], event_frames=[event_idx, event_idx], 
+                                cellTV.plot_arb_progress_2cells(dF=[dF, dF_lick], cell=[cell, 0], 
+                                                                sessions=[session, session],
+                                                                event_frames=[event_idx, event_idx], 
                                                                 ngoals=len(rew_goals)+1, bins=bins, 
-                                                                stages=[session_idx, session_idx], labels=[f'cell {cell}', 'lick rate'], 
+                                                                stages=np.array([session_idx, session_idx]), 
+                                                                labels=[f'cell {cell}', 'lick rate'], 
                                                                 plot=True, shuffle=False)
                             else:
                                 plot_arb_progress(dF, cell, event_idx, len(rew_goals) + 1, bins, session_idx, ax=None)
@@ -2560,6 +2563,8 @@ def get_first_licks(session, VR_data=None, nidaq_data=None):
     -------
     first_licks: Dict where the key corresponds to the lick ID
     """
+    buffer = 1  # in case lick is right at the lm entry boundary
+
     # Load data if needed
     if VR_data is None:
         base_path2 = parse_session_functions.find_base_path(session['mouse'],session['date'])
@@ -2584,25 +2589,25 @@ def get_first_licks(session, VR_data=None, nidaq_data=None):
 
     for id in range(1,11):
         if id == 1:
-            first_licks[id] = np.array([lick_idx[(lick_idx >= entry) & (lick_idx <= exit)][0]
+            first_licks[id] = np.array([lick_idx[(lick_idx >= entry - buffer) & (lick_idx <= exit)][0]
                     for i, (entry, exit) in enumerate(zip(lm_entry_idx, lm_exit_idx))
-                    if i in session['rewarded_landmarks'] and np.any((lick_idx >= entry) & (lick_idx <= exit))])
+                    if i in session['rewarded_landmarks'] and np.any((lick_idx >= entry - buffer) & (lick_idx <= exit))])
             
         elif id == 2:
-            first_licks[id] = np.array([lick_idx[(lick_idx >= entry) & (lick_idx <= exit)][0]
+            first_licks[id] = np.array([lick_idx[(lick_idx >= entry - buffer) & (lick_idx <= exit)][0]
                     for i, (entry, exit) in enumerate(zip(lm_entry_idx, lm_exit_idx))
-                    if i in session['goals_idx'] and i not in session['rewarded_landmarks'] and np.any((lick_idx >= entry) & (lick_idx <= exit))])
+                    if i in session['goals_idx'] and i not in session['rewarded_landmarks'] and np.any((lick_idx >= entry - buffer) & (lick_idx <= exit))])
             
         elif id == 3:
-            first_licks[id] = np.array([lick_idx[(lick_idx >= entry) & (lick_idx <= exit)][0]
+            first_licks[id] = np.array([lick_idx[(lick_idx >= entry - buffer) & (lick_idx <= exit)][0]
                     for i, (entry, exit) in enumerate(zip(lm_entry_idx, lm_exit_idx))
-                    if i in session['non_goals_idx'] and np.any((lick_idx >= entry) & (lick_idx <= exit))])
+                    if i in session['non_goals_idx'] and np.any((lick_idx >= entry - buffer) & (lick_idx <= exit))])
             
         elif id == 4:
             if session['test_idx'] is not None:
-                first_licks[id] = np.array([lick_idx[(lick_idx >= entry) & (lick_idx <= exit)][0]
+                first_licks[id] = np.array([lick_idx[(lick_idx >= entry - buffer) & (lick_idx <= exit)][0]
                         for i, (entry, exit) in enumerate(zip(lm_entry_idx, lm_exit_idx))
-                        if i in session['test_idx'] and np.any((lick_idx >= entry) & (lick_idx <= exit))])
+                        if i in session['test_idx'] and np.any((lick_idx >= entry - buffer) & (lick_idx <= exit))])
             else:
                 first_licks[id] = []
             
