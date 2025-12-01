@@ -292,7 +292,7 @@ def get_tuned_neurons(psth, event='reward', time_around=1, funcimg_frame_rate=45
 
     # Plot firing for a few significant neurons
     if plot_neurons:
-        for n in tuned_neurons[0:20]:
+        for n in tuned_neurons:
             fig, ax = plt.subplots(1, 1, figsize=(2,2), sharey=True)
             ax.plot(average_psth[n, :])      
             event_frame = -start_frames  
@@ -303,7 +303,7 @@ def get_tuned_neurons(psth, event='reward', time_around=1, funcimg_frame_rate=45
             ax.set_xticklabels([start_time, 0, end_time])
             ax.spines[['right', 'top']].set_visible(False)
             ax.set_ylabel('DF/F')
-            ax.set_title(f'p-value {wilcoxon_pval[n]}')
+            ax.set_title(f'neuron {n}, p-value {float(wilcoxon_pval[n]):.5f}')
 
     return tuned_neurons, wilcoxon_stat, wilcoxon_pval
 
@@ -3136,7 +3136,7 @@ def classify_4_or_5_peak_neurons(neurons, mean_goal_firing, peaks=[1,4,5], plot=
 
         # Triple the signal to detect boundary peaks
         avg_tripled = np.concatenate((smooth_avg_bin, smooth_avg_bin, smooth_avg_bin))
-        peaks_tripled, props = find_peaks(avg_tripled, distance=10, prominence=0.3, height=0.7)
+        peaks_tripled, props = find_peaks(avg_tripled, distance=10, prominence=0.3, wlen=50, height=0.7)
         
         # Discard very small peaks
         mask = props["peak_heights"] >= 0.4 * np.mean(props['peak_heights'])

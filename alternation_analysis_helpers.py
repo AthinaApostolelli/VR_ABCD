@@ -1,11 +1,97 @@
 import matplotlib.pyplot as plt
 import numpy as np
+import palettes 
 import scipy.stats as stats
 from scipy.stats import friedmanchisquare, wilcoxon, norm, kruskal, mannwhitneyu
 from scipy.signal import find_peaks
 from scipy.ndimage import gaussian_filter1d
+import neural_analysis_helpers
 
-def get_lm_data(session, neurons, patches, goal_patches, non_goal_patches, time_around,
+def get_XYY_patches(session, include_next=True):
+    # Find ABB and BAA patches 
+    non_goals = session['non_goals_idx']
+    goals = session['goals_idx']
+    event_idx = np.sort(np.concatenate([session['reward_idx'], session['miss_rew_idx'], session['nongoal_rew_idx']])).astype(int)
+
+    # Combine and label: 0 for non-goal, 1 for goal
+    combined = np.concatenate([non_goals, goals])
+    labels = np.concatenate([np.zeros(len(non_goals), dtype=int), np.ones(len(goals), dtype=int)])
+
+    # Sort by index
+    sorted_indices = np.argsort(combined)
+    combined_sorted = combined[sorted_indices]
+    labels_sorted = labels[sorted_indices]
+
+    # Find ABB and BAA patches
+    ABB_patches = []
+    BAA_patches = []
+
+    if include_next: # XYYX
+        for i in range(0, len(labels_sorted)-3):
+            if labels_sorted[i] == 1 and labels_sorted[i+1] == 0 and labels_sorted[i+2] == 0 and labels_sorted[i+3] == 1: # ABBA
+                ABB_patches.append(combined_sorted[i:i+4])
+            if labels_sorted[i] == 0 and labels_sorted[i+1] == 1 and labels_sorted[i+2] == 1 and labels_sorted[i+3] == 0: # BAAB
+                BAA_patches.append(combined_sorted[i:i+4])
+    else: # XYY
+        for i in range(0, len(labels_sorted)-2):
+            if labels_sorted[i] == 1 and labels_sorted[i+1] == 0 and labels_sorted[i+2] == 0: # ABB
+                ABB_patches.append(combined_sorted[i:i+3])
+            if labels_sorted[i] == 0 and labels_sorted[i+1] == 1 and labels_sorted[i+2] == 1: # BBA
+                BAA_patches.append(combined_sorted[i:i+3])
+
+    # Find the corresponding indices in the data 
+    lm_entry_idx, lm_exit_idx = neural_analysis_helpers.get_lm_entry_exit(session)
+
+    # Convert patches to entry/exit indices
+    ABB_patches_idx = [(event_idx[patch[0]], event_idx[patch[-1]]) for patch in ABB_patches]
+    BAA_patches_idx = [(event_idx[patch[0]], event_idx[patch[-1]]) for patch in BAA_patches]
+
+    return ABB_patches, BAA_patches, ABB_patches_idx, BAA_patches_idx
+
+
+def get_repeating_XY_patches(session, min_length=2):
+    # Find patches of alternating AB/BA 
+    non_goals = session['non_goals_idx']
+    goals = session['goals_idx']
+
+    # Combine and label: 0 for non-goal, 1 for goal
+    combined = np.concatenate([non_goals, goals])
+    labels = np.concatenate([np.zeros(len(non_goals), dtype=int), np.ones(len(goals), dtype=int)])
+
+    # Sort by index
+    sorted_indices = np.argsort(combined)
+    combined_sorted = combined[sorted_indices]
+    labels_sorted = labels[sorted_indices]
+
+    # Find alternating patches
+    patches = []
+    start = 0
+    for i in range(1, len(labels_sorted)):
+        if labels_sorted[i] == labels_sorted[i-1]:
+            # End of an alternating patch
+            if i - start > min_length:  
+                patches.append(combined_sorted[start:i])
+            start = i
+
+    # Check last patch 
+    if len(labels_sorted) - start >= 2:
+        patches.append(combined_sorted[start:])
+
+    # Filter patches based on A or B start
+    BA_patches = [patch for patch in patches if np.isin(patch[0], non_goals)]
+    AB_patches = [patch for patch in patches if np.isin(patch[0], goals)]
+
+    # Find the corresponding indices in the data 
+    lm_entry_idx, lm_exit_idx = neural_analysis_helpers.get_lm_entry_exit(session)
+
+    # Convert patches to entry/exit indices
+    patches_idx = [(lm_entry_idx[patch[0]], lm_exit_idx[patch[-1]]) for patch in patches]
+    BA_patches_idx = [(lm_entry_idx[patch[0]], lm_exit_idx[patch[-1]]) for patch in BA_patches]
+    AB_patches_idx = [(lm_entry_idx[patch[0]], lm_exit_idx[patch[-1]]) for patch in AB_patches]
+
+    return patches, AB_patches, BA_patches, patches_idx, AB_patches_idx, BA_patches_idx
+
+def get_lm_data(session, neurons, patches, AB_patches, BA_patches, time_around,
                 lm_entry_idx, lm_exit_idx, dF, condition='next', n_bins=31, funcimg_frame_rate=45,
                 zscoring=False, plot=True):
     """
@@ -19,7 +105,7 @@ def get_lm_data(session, neurons, patches, goal_patches, non_goal_patches, time_
         Indexed by session; contains neuron IDs.
     patches : list of arrays
         Patch trial indices.
-    goal_patches, non_goal_patches : list of arrays
+    AB_patches, BA_patches : list of arrays
         Patches categorized by goal or non-goal.
     lm_entry_idx, lm_exit_idx : array-like
         Entry and exit indices for landmarks.
@@ -48,11 +134,11 @@ def get_lm_data(session, neurons, patches, goal_patches, non_goal_patches, time_
     dF_sel = dF[neurons, :]
     
     # Flatten patches
-    goal_patches_flat = np.unique(np.concatenate([np.ravel(p) for p in goal_patches]))
-    non_goal_patches_flat = np.unique(np.concatenate([np.ravel(p) for p in non_goal_patches]))
+    AB_patches_flat = np.unique(np.concatenate([np.ravel(p) for p in AB_patches]))
+    BA_patches_flat = np.unique(np.concatenate([np.ravel(p) for p in BA_patches]))
     
-    goal_patches_by_length = {}
-    non_goal_patches_by_length = {}
+    AB_patches_by_length = {}
+    BA_patches_by_length = {}
 
     # Labels
     if condition == 'next':
@@ -115,21 +201,21 @@ def get_lm_data(session, neurons, patches, goal_patches, non_goal_patches, time_
             binned = stats.zscore(np.array(binned), axis=1)
 
         # Append to goal or non-goal dictionary
-        if patch[-1] in goal_patches_flat:
-            goal_patches_by_length.setdefault(patch_len, []).append(binned)
-        elif patch[-1] in non_goal_patches_flat:
-            non_goal_patches_by_length.setdefault(patch_len, []).append(binned)
+        if patch[-1] in AB_patches_flat:
+            AB_patches_by_length.setdefault(patch_len, []).append(binned)
+        elif patch[-1] in BA_patches_flat:
+            BA_patches_by_length.setdefault(patch_len, []).append(binned)
     
     # Stack lists into arrays: shape (n_patches, n_neurons, n_bins)
-    for length in goal_patches_by_length:
-        goal_patches_by_length[length] = np.stack(goal_patches_by_length[length], axis=0)
-    for length in non_goal_patches_by_length:
-        non_goal_patches_by_length[length] = np.stack(non_goal_patches_by_length[length], axis=0)
+    for length in AB_patches_by_length:
+        AB_patches_by_length[length] = np.stack(AB_patches_by_length[length], axis=0)
+    for length in BA_patches_by_length:
+        BA_patches_by_length[length] = np.stack(BA_patches_by_length[length], axis=0)
     
     if plot:
         # --- Plot Goal Patches ---
-        fig_goal, goal_ax = plt.subplots(1, len(goal_patches_by_length), figsize=(3*len(goal_patches_by_length), 3), sharey=True, squeeze=False)
-        for i, (length, arr) in enumerate(sorted(goal_patches_by_length.items())):
+        fig_goal, goal_ax = plt.subplots(1, len(AB_patches_by_length), figsize=(3*len(AB_patches_by_length), 3), sharey=True, squeeze=False)
+        for i, (length, arr) in enumerate(sorted(AB_patches_by_length.items())):
             if n_neurons == 1:
                 mean_data = np.nanmean(np.squeeze(arr, axis=1), axis=0)
             else:
@@ -143,8 +229,8 @@ def get_lm_data(session, neurons, patches, goal_patches, non_goal_patches, time_
         plt.tight_layout()
     
         # --- Plot Non-Goal Patches ---
-        fig_non_goal, non_goal_ax = plt.subplots(1, len(non_goal_patches_by_length), figsize=(3*len(non_goal_patches_by_length), 3), sharey=True, squeeze=False)
-        for i, (length, arr) in enumerate(sorted(non_goal_patches_by_length.items())):
+        fig_non_goal, non_goal_ax = plt.subplots(1, len(BA_patches_by_length), figsize=(3*len(BA_patches_by_length), 3), sharey=True, squeeze=False)
+        for i, (length, arr) in enumerate(sorted(BA_patches_by_length.items())):
             if n_neurons == 1:
                 mean_data = np.nanmean(np.squeeze(arr, axis=1), axis=0)
             else:
@@ -158,37 +244,38 @@ def get_lm_data(session, neurons, patches, goal_patches, non_goal_patches, time_
         plt.tight_layout()
     
         return {
-            "goal_patches_by_length": goal_patches_by_length,
-            "non_goal_patches_by_length": non_goal_patches_by_length
+            "AB_patches_by_length": AB_patches_by_length,
+            "BA_patches_by_length": BA_patches_by_length
         }, goal_ax, non_goal_ax
     
     else:
         return {
-            "goal_patches_by_length": goal_patches_by_length,
-            "non_goal_patches_by_length": non_goal_patches_by_length
+            "AB_patches_by_length": AB_patches_by_length,
+            "BA_patches_by_length": BA_patches_by_length
         }, None, None
 
 
-def compare_lms_in_AB_patches(neurons, session, patches, goal_patches, non_goal_patches, lm_entry_idx, 
-                              lm_exit_idx, dF, time_around, n_bins=10, zscoring=False, plot=True, plot_neurons=None):
+def compare_lms_in_AB_patches(neurons, session, patches, AB_patches, BA_patches, dF, time_around, n_bins=10, zscoring=False, plot=True, plot_neurons=None):
     
-    next_lm_data, _, _ = get_lm_data(session, neurons, patches, goal_patches, non_goal_patches, time_around,
+    lm_entry_idx, lm_exit_idx = neural_analysis_helpers.get_lm_entry_exit(session)
+
+    next_lm_data, _, _ = get_lm_data(session, neurons, patches, AB_patches, BA_patches, time_around,
                 lm_entry_idx, lm_exit_idx, dF, condition='next', n_bins=n_bins, zscoring=zscoring, plot=False)
 
-    lm_data, _, _ = get_lm_data(session, neurons, patches, goal_patches, non_goal_patches, time_around,
+    lm_data, _, _ = get_lm_data(session, neurons, patches, AB_patches, BA_patches, time_around,
                     lm_entry_idx, lm_exit_idx, dF, condition='last', n_bins=n_bins, zscoring=zscoring, plot=False)
 
-    prev_lm_data, _, _ = get_lm_data(session, neurons, patches, goal_patches, non_goal_patches, time_around,
+    prev_lm_data, _, _ = get_lm_data(session, neurons, patches, AB_patches, BA_patches, time_around,
                     lm_entry_idx, lm_exit_idx, dF, condition='prev', n_bins=n_bins, zscoring=zscoring, plot=False)
 
     # Extract goal/non-goal by length for all three conditions
-    goal_data = {'prev': prev_lm_data['goal_patches_by_length'],
-                'last': lm_data['goal_patches_by_length'],
-                'next': next_lm_data['goal_patches_by_length']}
+    goal_data = {'prev': prev_lm_data['AB_patches_by_length'],
+                'last': lm_data['AB_patches_by_length'],
+                'next': next_lm_data['AB_patches_by_length']}
 
-    non_goal_data = {'prev': prev_lm_data['non_goal_patches_by_length'],
-                    'last': lm_data['non_goal_patches_by_length'],
-                    'next': next_lm_data['non_goal_patches_by_length']}
+    non_goal_data = {'prev': prev_lm_data['BA_patches_by_length'],
+                    'last': lm_data['BA_patches_by_length'],
+                    'next': next_lm_data['BA_patches_by_length']}
 
     line_styles = {'prev': ':', 'last': '-', 'next': '--'}
     colors = {'goal': 'blue', 'non_goal': 'orange'}
@@ -307,11 +394,11 @@ def compute_lm_mean(next_lm_data, lm_data, prev_lm_data):
         non_goal_means[cond] = {}
 
         # Goal patches
-        for length, arr in data['goal_patches_by_length'].items():
+        for length, arr in data['AB_patches_by_length'].items():
             # arr shape: (n_patches, n_neurons, n_bins)
             goal_means[cond][length] = np.nanmean(arr, axis=(0,2))  # → (n_neurons,)
         # Non-goal patches
-        for length, arr in data['non_goal_patches_by_length'].items():
+        for length, arr in data['BA_patches_by_length'].items():
             non_goal_means[cond][length] = np.nanmean(arr, axis=(0,2))
 
     return goal_means, non_goal_means
@@ -330,8 +417,8 @@ def compute_neuron_lm_mean(next_lm_data, lm_data, prev_lm_data):
     for cond, data in all_data.items():
 
         # collect all length arrays
-        goal_arrays = list(data['goal_patches_by_length'].values())
-        non_goal_arrays = list(data['non_goal_patches_by_length'].values())
+        goal_arrays = list(data['AB_patches_by_length'].values())
+        non_goal_arrays = list(data['BA_patches_by_length'].values())
 
         # result containers
         goal_list = []
@@ -439,10 +526,10 @@ def get_responsive_neurons(psth, event='reward', time_around=1, funcimg_frame_ra
     return tuned_neurons, tuned_neurons_high, tuned_neurons_low, wilcoxon_stat, wilcoxon_pval
 
 
-def temporal_bin_ABB_firing(ABB_patches, ABB_patches_idx, cell, dF, bins=90, plot=True):
-    binned_phase_firing = np.zeros((len(ABB_patches), bins))
+def temporal_bin_ABB_firing(ABB_patches_idx, cell, dF, bins=90, plot=True):
+    binned_phase_firing = np.zeros((len(ABB_patches_idx), bins))
 
-    for i in range(len(ABB_patches)):
+    for i in range(len(ABB_patches_idx)):
         phase_frames = np.arange(ABB_patches_idx[i][0], ABB_patches_idx[i][1])
         bin_edges = np.linspace(ABB_patches_idx[i][0], ABB_patches_idx[i][1], bins+1)
         phase_firing = dF[cell, phase_frames]
@@ -462,11 +549,11 @@ def temporal_bin_ABB_firing(ABB_patches, ABB_patches_idx, cell, dF, bins=90, plo
     return binned_phase_firing
 
 
-def spatial_bin_ABB_firing(ABB_patches, ABB_patches_idx, cell, dF, session, bins=90, plot=True):
+def spatial_bin_ABB_firing(ABB_patches_idx, cell, dF, session, bins=90, plot=True):
     positions = session['position']
-    binned_phase_firing = np.zeros((len(ABB_patches), bins))
+    binned_phase_firing = np.zeros((len(ABB_patches_idx), bins))
 
-    for i in range(len(ABB_patches)):
+    for i in range(len(ABB_patches_idx)):
         phase_frames = np.arange(ABB_patches_idx[i][0], ABB_patches_idx[i][1])
         phase_positions = positions[phase_frames]
         bin_edges = np.linspace(phase_positions.min(), phase_positions.max(), bins+1)
@@ -487,13 +574,13 @@ def spatial_bin_ABB_firing(ABB_patches, ABB_patches_idx, cell, dF, session, bins
     return binned_phase_firing
 
 
-def get_spatial_and_temporal_ABB_binning(ABB_patches, ABB_patches_idx, neurons, dF, session, bins=90):
+def get_spatial_and_temporal_ABB_binning(ABB_patches_idx, neurons, dF, session, bins=90):
     
     temporal_ABB_firing = {}
     spatial_ABB_firing = {}
     for cell in neurons:
-        temporal_ABB_firing[cell] = temporal_bin_ABB_firing(ABB_patches, ABB_patches_idx, cell, dF, bins, plot=False)
-        spatial_ABB_firing[cell] = spatial_bin_ABB_firing(ABB_patches, ABB_patches_idx, cell, dF, session, bins, plot=False)
+        temporal_ABB_firing[cell] = temporal_bin_ABB_firing(ABB_patches_idx, cell, dF, bins, plot=False)
+        spatial_ABB_firing[cell] = spatial_bin_ABB_firing(ABB_patches_idx, cell, dF, session, bins, plot=False)
 
     # Get the mean across patches for all neurons
     avg_temporal_ABB_firing = np.empty((len(neurons), bins))
@@ -549,6 +636,152 @@ def get_spatial_and_temporal_ABB_binning(ABB_patches, ABB_patches_idx, neurons, 
 
     return binned_ABB_firing_rates
 
+def temporal_bin_lm_firing(lm, cell, dF, bins=90):
+    '''Temporal binning within two specific events e.g. between consecutive landmarks.'''
+    binned_phase_firing = np.zeros(bins)
+
+    phase_frames = np.arange(lm[0], lm[1])
+    bin_edges = np.linspace(lm[0], lm[1], bins+1)
+    phase_firing = dF[cell, phase_frames]
+
+    bin_ix = np.digitize(phase_frames, bin_edges)
+    for j in range(bins):
+        binned_phase_firing[j] = np.mean(phase_firing[bin_ix == j+1])
+
+    return binned_phase_firing
+
+def get_temporal_phase_binning_per_lm(neurons, dF, XYY_patches, event_idx, bins=30, condition='ABB', plot=True):
+    # Collect all landmark pair binnings for all patches
+    binned_XYY_phase_firing = {cell: [] for cell in neurons}
+ 
+    n_lms = len(XYY_patches[0]) - 1
+
+    for n, cell in enumerate(neurons):
+        for patch in XYY_patches:
+            if condition == 'BB' or condition == 'AA':
+                # Assume that lm entry and exit, and YY midpoint indices are provided
+                assert n_lms == 2, 'Each patch should have 3 landmarks - XYY'
+                patch_bin_list = [temporal_bin_lm_firing([event_idx[lm][0], event_idx[lm][1]], cell, dF, bins=bins) for lm in patch[1:]]
+            else:
+                assert n_lms == 3, 'Each patch should have 4 landmarks - XYYX'
+                patch_bin_list = [temporal_bin_lm_firing([event_idx[lm], event_idx[lm+1]], cell, dF, bins=bins) for lm in patch[:-1]]
+
+            linear_patch_binned = np.concatenate(patch_bin_list)  # convert list to array and flatten
+            binned_XYY_phase_firing[cell].append(linear_patch_binned)
+
+    for cell in neurons:
+        binned_XYY_phase_firing[cell] = np.array(binned_XYY_phase_firing[cell])
+
+    # Average across patches
+    avg_binned_XYY_phase_firing = np.empty((len(neurons), bins * n_lms))
+    for n, cell in enumerate(neurons):
+        avg_binned_XYY_phase_firing[n] = np.nanmean(binned_XYY_phase_firing[cell], axis=0)
+
+    # Z-score
+    zscored_avg_binned_XYY_phase_firing = stats.zscore(avg_binned_XYY_phase_firing, axis=1)
+
+    # Sort according to max firing 
+    peak_bins = np.argmax(zscored_avg_binned_XYY_phase_firing, axis=1)
+    sort_order = np.argsort(peak_bins)
+    sorted_zscored_avg_binned_XYY = zscored_avg_binned_XYY_phase_firing[sort_order]
+
+    # Plotting
+    if plot:
+        fig = plt.figure(figsize=(3,3))
+        ax1 = fig.add_subplot(111)
+        cax1 = ax1.imshow(sorted_zscored_avg_binned_XYY, aspect='auto', cmap='viridis', interpolation='none')
+        if n_lms > 2:
+            ax1.vlines(x=bins-1, ymin=0, ymax=len(neurons)-1, linestyles='--', colors='white')
+            ax1.vlines(x=2*bins-1, ymin=0, ymax=len(neurons)-1, linestyles='--', colors='white')
+            ax1.set_xticks([0, bins-1, 2*bins-1, 3*bins-1])
+            if condition == 'ABB':
+                ax1.set_xticklabels(['A', 'B', 'B', 'A'])
+            elif condition == 'BAA':
+                ax1.set_xticklabels(['B', 'A', 'A', 'B'])
+            else:
+                ax1.set_xticklabels(['X', 'Y', 'Y', 'X'])
+        else:
+            ax1.vlines(x=bins-1, ymin=0, ymax=len(neurons)-1, linestyles='--', colors='white')
+            ax1.set_xticks([0, bins-1, 2*bins-1])
+            if condition == 'BB':
+                ax1.set_xticklabels(['B1 entry', 'BB mid', 'B2 exit'])
+            elif condition == 'AA':
+                ax1.set_xticklabels(['A1 entry', 'AA mid', 'A2 exit'])
+            else:
+                ax1.set_xticklabels(['Y1 entry', 'YY mid', 'Y2 exit'])
+
+        cb1 = fig.colorbar(cax1, ax=ax1, label='dF/F')  
+        
+        ax1.set_xlabel('Time bins')
+        ax1.set_yticks([0, len(neurons)-1])
+        ax1.set_yticklabels([0, len(neurons)])
+        ax1.set_ylabel('Neurons', labelpad=-5)
+
+    # Collect all data into a dict - maintain similar structure to get_spatial_and_temporal_ABB_binning
+    binned_XYY_phase_activity = {}
+    binned_XYY_phase_activity['temporal_ABB_firing'] = binned_XYY_phase_firing
+    binned_XYY_phase_activity['avg_temporal_ABB_firing'] = avg_binned_XYY_phase_firing
+    binned_XYY_phase_activity['zscored_sorted_temporal'] = sorted_zscored_avg_binned_XYY
+
+    return binned_XYY_phase_activity
+
+
+def get_binning_by_XY_patch_length(neurons, session, dF, condition='AB', bins=90, plot=True, last_lm=False):
+    '''
+    Bin neural activity according to the length of the patch. 
+    If last_lm is False, the neural activity is binned across the entire patch. Otherwise, binning 
+    is done only for the last Y in the patch. 
+    '''
+    # Find patches of alternating AB/BA 
+    _, AB_patches, BA_patches, _, _, _ = get_repeating_XY_patches(session, min_length=0)
+    
+    if condition == 'AB':
+        patches = AB_patches
+    elif condition == 'BA':
+        patches = BA_patches
+    
+    XY_repeats = np.array([len(patch) / 2 for patch in patches]).astype(int)
+
+    # Bin from the beginning to the end of the patch
+    lm_entry_idx, lm_exit_idx = neural_analysis_helpers.get_lm_entry_exit(session)
+    entry_exit_events = np.sort(np.concatenate([lm_entry_idx, lm_exit_idx]))
+    
+    binned_XY_patch_activity = {cell: [] for cell in neurons}
+    avg_XY_patch_length_activity = {cell: {} for cell in neurons}
+
+    for cell in neurons: 
+        # Bin activity across each patch
+        for i, patch in enumerate(patches):
+            if last_lm:
+                events = [entry_exit_events[2*patch[-1]], entry_exit_events[2*patch[-1]+1]]
+            else:
+                events = [entry_exit_events[2*patch[0]], entry_exit_events[2*patch[-1]+1]]
+            patch_binned_activity = temporal_bin_lm_firing(events, cell, dF, bins=bins)
+            binned_XY_patch_activity[cell].append(patch_binned_activity)
+
+        binned_XY_patch_activity[cell] = np.array(binned_XY_patch_activity[cell]) # (n_patches x n_bins)
+
+        # Average by patch length 
+        for length in np.unique(XY_repeats):
+            avg_XY_patch_length_activity[cell][length] = np.mean(binned_XY_patch_activity[cell][XY_repeats == length, :], axis=0)
+
+        if plot:
+            _, ax = plt.subplots(1, len(np.unique(XY_repeats)), sharey=True, sharex=True, figsize=(12,3))
+            ax = ax.ravel()
+            for i, length in enumerate(np.unique(XY_repeats)):
+                ax[i].plot(avg_XY_patch_length_activity[cell][length])
+                ax[i].set_xticks([0, avg_XY_patch_length_activity[cell][length].shape[0]])
+                if last_lm:
+                    ax[i].set_xticklabels([f'last {condition[1]}\nstart', f'last {condition[1]}\nend'])
+                else:
+                    ax[i].set_xticklabels([f'first {condition[0]}', f'last {condition[1]}'])
+                ax[i].set_title(f'#{condition} = {length}')
+            ax[0].set_ylabel('dF/F')
+            plt.suptitle(f'Neuron {cell}')
+            plt.tight_layout()
+
+    return binned_XY_patch_activity, avg_XY_patch_length_activity
+
 
 def find_cells_with_ABB_peaks(neurons, binned_activity, condition='temporal', plot=True):
     # ABB_patch_length_cm = session4['position'][ABB_patches_idx[0][1]] - session4['position'][ABB_patches_idx[0][0]]
@@ -588,6 +821,146 @@ def find_cells_with_ABB_peaks(neurons, binned_activity, condition='temporal', pl
 
     return peak_cells
 
+def get_YY_diff_cells(neurons, binned_YY_phase_activity, bins=30, condition='BB', plot=True):
+    '''Find neurons with significantly different responses during Y1 vs Y2'''
+    wilcoxon_stat = np.zeros((len(neurons), 1))
+    wilcoxon_pval = np.zeros((len(neurons), 1))
+        
+    for n, cell in enumerate(neurons):
+        mean_Y1 = np.mean(binned_YY_phase_activity['temporal_ABB_firing'][cell][:, :bins], axis=1)
+        mean_Y2 = np.mean(binned_YY_phase_activity['temporal_ABB_firing'][cell][:, bins:], axis=1)
+        
+        wilcoxon_stat[n], wilcoxon_pval[n] = stats.wilcoxon(mean_Y1, mean_Y2)
+
+    YY_diff_cells = np.array(neurons)[np.where(wilcoxon_pval < 0.01)[0]]
+
+    if plot:
+        for cell in neurons:
+            if np.isin(cell, YY_diff_cells):
+                data = binned_YY_phase_activity['temporal_ABB_firing'][cell]
+
+                # Calculate difference between Y1 and Y2
+                YY_diff = data[:, bins:] - data[:, :bins] # Y2-Y1
+                
+                # Plot
+                fig = plt.figure(figsize=(6,4))
+                gs = plt.GridSpec(1, 2, width_ratios=[2, 1])  
+                ax1 = fig.add_subplot(gs[0,0])
+                ax2 = fig.add_subplot(gs[0,1], sharey=ax1)
+                
+                vmin1, vmax1 = np.nanmin(data), np.nanmax(data)
+                nbins = data.shape[1]
+                n_trials = data.shape[0]
+
+                cax1 = ax1.imshow(data, aspect='auto', cmap='viridis', interpolation='none')
+                ax1.set_title(f'Binned Firing Rates (Temporal)')
+                ax1.set_xlabel('Time bins')
+                cb1 = fig.colorbar(cax1, ax=ax1, label='dF/F', ticks=[vmin1, vmax1])
+                cb1.ax.set_yticklabels([f"{vmin1:.1f}", f"{vmax1:.1f}"]) 
+                cb1.ax.yaxis.labelpad = -10
+                ax1.set_yticks([0, n_trials-1])
+                ax1.set_yticklabels([0, n_trials])
+                ax1.vlines(x=bins-1, ymin=0, ymax=len(neurons)-1, linestyles='--', colors='white')
+                ax1.set_xticks([0, bins-1, 2*bins-1])
+                if condition == 'BB':
+                    ax1.set_xticklabels(['B1 entry', 'BB mid', 'B2 exit'])
+                elif condition == 'AA':
+                    ax1.set_xticklabels(['A1 entry', 'AA mid', 'A2 exit'])
+                else:
+                    ax1.set_xticklabels(['Y1 entry', 'YY mid', 'Y2 exit'])
+                ax1.set_ylabel('Trial (patch)', labelpad=-5)
+                ax1.vlines(x=bins-1, ymin=0, ymax=n_trials-1, linestyles='--', colors='white')
+                
+                vmax = np.max(np.abs(YY_diff))
+                vmin = -vmax
+                cax2 = ax2.imshow(YY_diff, aspect='auto', cmap='bwr', vmin=vmin, vmax=vmax)
+                cb2 = fig.colorbar(cax2, ax=ax2, label='YY diff dF/F', ticks=[vmin, vmax])
+                cb2.ax.set_yticklabels([f"{vmin:.1f}", f"{vmax:.1f}"])
+                cb2.ax.yaxis.labelpad = -10
+                ax2.set_yticks([0, n_trials-1])
+                ax2.set_yticklabels([0, n_trials])
+                ax2.set_xticks([0, bins-1])
+                ax2.set_xticklabels([0, bins])
+                ax2.set_xlabel('Time bins')
+                ax2.set_title(f'Y2-Y1')
+                
+                plt.suptitle(f'Neuron {cell}') 
+
+    return YY_diff_cells
+
+
+def get_Y_psth(neurons, session, dF, events, condition='AB', lm='last_Y', time_around=0.5, plot=True):
+    '''
+    Get the PSTH around a Y event according to patch type. 
+    If last_Y, this is the last Y inside an XY patch. Otherwise, if next_Y, this is the first Y following
+    an alternation violation i.e., the next Y after the end of a patch.
+    '''
+    assert lm in ('last_Y', 'next_Y'), "Valid values for lm are 'last_Y and 'next_Y'."
+
+    # Handle time window input
+    if isinstance(time_around, (int, float)):
+        start_time = -time_around
+        end_time = time_around
+    elif isinstance(time_around, (tuple, list)) and len(time_around) == 2:
+        start_time, end_time = time_around
+    else:
+        raise ValueError("time_around must be a single number or a tuple/list of (start, end)")
+
+    # Find patches of alternating AB/BA 
+    _, AB_patches, BA_patches, _, _, _ = get_repeating_XY_patches(session, min_length=0)
+
+    if condition == 'AB':
+        patches = AB_patches
+    elif condition == 'BA':
+        patches = BA_patches
+
+    XY_repeats = np.array([len(patch) / 2 for patch in patches]).astype(int)
+
+    # PSTH for last Y in each patch
+    if lm == 'last_Y':
+        event_idx = [events[patch[-1]] for patch in patches]
+    elif lm == 'next_Y':
+        event_idx = [events[patch[-1]+1] for patch in patches if patch[-1]+1 < len(events)]
+
+    psth_patch, _ = neural_analysis_helpers.get_psth(dF, neurons, event_idx, time_around=time_around) # (n_neurons x n_patches x n_timebins)
+
+    # Average PSTH by patch length 
+    avg_psth_patch = {}
+    for length in np.unique(XY_repeats):
+        patch_mask = XY_repeats == length
+        avg_psth_patch[length] = np.mean(psth_patch[:, patch_mask[:psth_patch.shape[1]], :], axis=1) # (n_neurons x n_timebins)
+
+    # Plotting
+    if plot:
+        palette = palettes.met_brew('Johnson', n=len(np.unique(XY_repeats)), brew_type="continuous")
+        num_timebins = psth_patch.shape[-1]
+
+        for n, cell in enumerate(neurons):
+            _, ax = plt.subplots(1, 1, figsize=(3,3))
+            
+            for i, length in enumerate(np.unique(XY_repeats).astype(int)):
+                ax.plot(avg_psth_patch[length][n], color=palette[i], linewidth=2, label=length)
+                ax.fill_between(np.arange(num_timebins),
+                                avg_psth_patch[length][n] - stats.sem(psth_patch[n, :, :], axis=0),
+                                avg_psth_patch[length][n] + stats.sem(psth_patch[n, :, :], axis=0),
+                                color=palette[i], alpha=0.3)
+            
+            ax.set_ylabel('dF/F')
+            ax.set_xlabel('Time (s)')
+            zero_bin = int(round(-start_time / (end_time - start_time) * num_timebins))
+            ax.set_xticks([0, zero_bin, num_timebins - 1])
+            ax.set_xticklabels([round(start_time, 2), 0, round(end_time, 2)])
+            ax.axvspan(zero_bin, num_timebins, color='gray', alpha=0.5)
+            ax.spines[['right', 'top']].set_visible(False)
+
+            plt.figlegend(loc='upper right', title=f'# {condition}s', bbox_to_anchor=(1.15, 0.8), borderaxespad=0)
+            if lm == 'last_Y':
+                plt.suptitle(f'last {condition[-1]}: neuron {cell}')
+            if lm == 'next_Y':
+                plt.suptitle(f'next {condition[-1]}: neuron {cell}')
+            plt.tight_layout()
+    
+    return psth_patch, avg_psth_patch
 
 # --------- STATISTICS --------- #
 def kendalls_W(chi2, N, k):
@@ -711,3 +1084,98 @@ def compute_per_neuron_stats(neuron_means):
         }
 
     return stats
+
+
+def fit_linear_regression_XYlen(neurons, Y_data, session, condition='AB', data_type='YY_diff', plot=True):
+    '''
+    Fit linear regression per time bin to determine if the number of preceding XYs predicts:
+    (a) the difference between two consecutive Ys ['YY_diff'], or 
+    (b) if the activity in the last Y in the patch ['last_Y'] 
+    '''
+    # Define patches
+    _, AB_patches, BA_patches, _, _, _ = get_repeating_XY_patches(session, min_length=0)
+
+    # Find preceding XY length for each patch
+    if condition == 'AB':
+        patches = AB_patches
+    elif condition == 'BA':
+        patches = BA_patches
+
+    XY_repeats = np.array([len(patch) / 2 for patch in patches]).astype(int)
+
+    # Perform linear regression per time bin
+    x = XY_repeats
+
+    linear_regression_result = {}
+    for cell in neurons:
+        linear_regression_result[cell] = {}
+        for t in range(Y_data[cell].shape[1]):
+            y = Y_data[cell][:,t]
+            linear_regression_result[cell][t] = stats.linregress(x, y, alternative='two-sided')
+
+    slopes = {cell: [res.slope for t, res in linear_regression_result[cell].items()] for cell in neurons}
+    rvalues = {cell: [res.rvalue for t, res in linear_regression_result[cell].items()] for cell in neurons}
+
+    # Plotting
+    if plot: 
+        max_slope = min(min(v) for v in slopes.values()) # keep y-axis the same for all cells
+        min_slope = max(max(v) for v in slopes.values())
+
+        for cell in neurons:
+            fig = plt.figure(figsize=(7,4))
+            gs = plt.GridSpec(1, 2, width_ratios=[2, 1])  
+            ax1 = fig.add_subplot(gs[0,0])
+            ax2 = fig.add_subplot(gs[0,1])
+            
+            n_bins = Y_data[cell].shape[1]
+            n_trials = Y_data[cell].shape[0]
+
+            cax1 = ax1.plot(slopes[cell], label='slope')
+            ax1.set_title(f'Linear Regression results')
+            ax1.set_xlabel('Time bins')
+            ax1.set_ylim([max_slope, min_slope])
+            ax1.hlines(y=0, xmin=0, xmax=n_bins, linestyles='--', colors='grey')
+            # ax1.set_yticks([0, n_trials-1])
+            # ax1.set_yticklabels([0, n_trials])
+            ax1.set_xticks([0, n_bins])
+            ax1.set_ylabel('Beta coefficients (slopes)', labelpad=0)
+
+            axr = ax1.twinx()
+            axr.set_ylim(ax1.get_ylim())
+            axr.plot(rvalues[cell], color='orange', alpha=0.7, label="r-value")
+            axr.set_ylabel("Pearson Correlation (r)", color='orange')
+            axr.tick_params(axis='y', labelcolor='orange')
+            lines_left, labels_left = ax1.get_legend_handles_labels()
+            lines_right, labels_right = axr.get_legend_handles_labels()
+            ax1.legend(lines_left + lines_right, labels_left + labels_right, loc="upper right")
+            
+            if data_type == 'YY_diff':
+                vmax = np.max(np.abs(Y_data[cell]))
+                vmin = -vmax
+                cax2 = ax2.imshow(Y_data[cell], aspect='auto', cmap='bwr', vmin=vmin, vmax=vmax)
+                if condition == 'AB':
+                    ax2.set_title(f'B2-B1')
+                elif condition == 'BA':
+                    ax2.set_title(f'A2-A1')
+                cb2 = fig.colorbar(cax2, ax=ax2, label='YY diff dF/F', ticks=[vmin, vmax])
+            elif data_type == 'last_Y':
+                vmax = np.max(Y_data[cell])
+                vmin = np.min(Y_data[cell])
+                cax2 = ax2.imshow(Y_data[cell], aspect='auto', cmap='viridis')
+                if condition == 'AB':
+                    ax2.set_title(f'last B')
+                elif condition == 'BA':
+                    ax2.set_title(f'last A')
+                cb2 = fig.colorbar(cax2, ax=ax2, label='dF/F', ticks=[vmin, vmax])
+            cb2.ax.set_yticklabels([f"{vmin:.1f}", f"{vmax:.1f}"])
+            cb2.ax.yaxis.labelpad = -10
+            ax2.set_yticks([0, n_trials-1])
+            ax2.set_yticklabels([0, n_trials])
+            ax2.set_xticks([0, n_bins-1])
+            ax2.set_xticklabels([0, n_bins])
+            ax2.set_xlabel('Time bins')
+            
+            plt.suptitle(f'{condition}: neuron {cell}') 
+            plt.tight_layout()
+
+    return slopes, rvalues
