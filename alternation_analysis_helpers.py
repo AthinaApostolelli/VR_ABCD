@@ -576,7 +576,7 @@ def spatial_bin_ABB_firing(ABB_patches_idx, cell, dF, session, bins=90, plot=Tru
 
 
 def get_spatial_and_temporal_ABB_binning(ABB_patches_idx, neurons, dF, session, bins=90):
-    
+    '''Binning of neural activity inside a XYY patch from the beginning to the end of the patch.'''
     temporal_ABB_firing = {}
     spatial_ABB_firing = {}
     for cell in neurons:
@@ -652,6 +652,8 @@ def temporal_bin_lm_firing(lm, cell, dF, bins=90):
     return binned_phase_firing
 
 def get_temporal_phase_binning_per_lm(neurons, dF, XYY_patches, event_idx, bins=30, condition='ABB', plot=True):
+    '''Binning of neural activity inside a XYY patch from the beginning to the end of each landmark in the the patch.'''
+    
     # Collect all landmark pair binnings for all patches
     binned_XYY_phase_firing = {cell: [] for cell in neurons}
  
@@ -1436,13 +1438,13 @@ def fit_linear_regression_XYlen_cpa(neurons, Y_data, session, condition='AB', da
         patches = BA_patches
 
     XY_repeats = np.array([len(patch) / 2 for patch in patches]).astype(int)
+    XY_repeats = XY_repeats[:Y_data[neurons[0]].shape[0]] # exclude last repeat if it doesn't end with an XYY patch
 
     # Perform linear regression per time bin
     x = XY_repeats.copy()
 
     linear_regression_result = {}
     for cell in neurons:
-        x = x[:Y_data[cell].shape[0]]
         nbins = Y_data[cell].shape[1]
         linear_regression_result[cell] = {}
         for t in range(nbins):
