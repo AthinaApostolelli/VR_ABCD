@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import palettes 
+import os
 import scipy.stats as stats
 from scipy.stats import friedmanchisquare, wilcoxon, norm, kruskal, mannwhitneyu
 from scipy.signal import find_peaks
@@ -8,10 +9,10 @@ from scipy.ndimage import gaussian_filter1d
 import neural_analysis_helpers
 
 def get_XYY_patches(session, include_next=True):
-    # Find ABB and BAA patches 
-    non_goals = session['non_goals_idx']
-    goals = session['goals_idx']
-    event_idx = np.sort(np.concatenate([session['reward_idx'], session['miss_rew_idx'], session['nongoal_rew_idx']])).astype(int)
+    # Find ABB and BAA patches     
+    event_idx = session['event_idx']
+    non_goals = session['non_goals_idx'][session['non_goals_idx'] < len(event_idx)]
+    goals = session['goals_idx'][session['goals_idx'] < len(event_idx)]
 
     # Combine and label: 0 for non-goal, 1 for goal
     combined = np.concatenate([non_goals, goals])
@@ -39,9 +40,6 @@ def get_XYY_patches(session, include_next=True):
             if labels_sorted[i] == 0 and labels_sorted[i+1] == 1 and labels_sorted[i+2] == 1: # BBA
                 BAA_patches.append(combined_sorted[i:i+3])
 
-    # Find the corresponding indices in the data 
-    lm_entry_idx, lm_exit_idx = neural_analysis_helpers.get_lm_entry_exit(session)
-
     # Convert patches to entry/exit indices
     ABB_patches_idx = [(event_idx[patch[0]], event_idx[patch[-1]]) for patch in ABB_patches]
     BAA_patches_idx = [(event_idx[patch[0]], event_idx[patch[-1]]) for patch in BAA_patches]
@@ -51,8 +49,8 @@ def get_XYY_patches(session, include_next=True):
 
 def get_repeating_XY_patches(session, min_length=2):
     # Find patches of alternating AB/BA 
-    non_goals = session['non_goals_idx']
-    goals = session['goals_idx']
+    non_goals = session['non_goals_idx'][session['non_goals_idx'] < len(session['event_idx'])]
+    goals = session['goals_idx'][session['goals_idx'] < len(session['event_idx'])]
 
     # Combine and label: 0 for non-goal, 1 for goal
     combined = np.concatenate([non_goals, goals])
@@ -82,12 +80,15 @@ def get_repeating_XY_patches(session, min_length=2):
     AB_patches = [patch for patch in patches if np.isin(patch[0], goals)]
 
     # Find the corresponding indices in the data 
-    lm_entry_idx, lm_exit_idx = neural_analysis_helpers.get_lm_entry_exit(session)
+    # lm_entry_idx, lm_exit_idx = neural_analysis_helpers.get_lm_entry_exit(session)
 
-    # Convert patches to entry/exit indices
-    patches_idx = [(lm_entry_idx[patch[0]], lm_exit_idx[patch[-1]]) for patch in patches]
-    BA_patches_idx = [(lm_entry_idx[patch[0]], lm_exit_idx[patch[-1]]) for patch in BA_patches]
-    AB_patches_idx = [(lm_entry_idx[patch[0]], lm_exit_idx[patch[-1]]) for patch in AB_patches]
+    # # Convert patches to entry/exit indices
+    # patches_idx = [(lm_entry_idx[patch[0]], lm_exit_idx[patch[-1]]) for patch in patches]
+    # BA_patches_idx = [(lm_entry_idx[patch[0]], lm_exit_idx[patch[-1]]) for patch in BA_patches]
+    # AB_patches_idx = [(lm_entry_idx[patch[0]], lm_exit_idx[patch[-1]]) for patch in AB_patches]
+    patches_idx = None
+    AB_patches_idx = None
+    BA_patches_idx = None
 
     return patches, AB_patches, BA_patches, patches_idx, AB_patches_idx, BA_patches_idx
 
@@ -821,11 +822,13 @@ def find_cells_with_ABB_peaks(neurons, binned_activity, condition='temporal', pl
 
     return peak_cells
 
-def get_YY_diff_cells(neurons, binned_YY_phase_activity, bins=30, condition='BB', plot=True):
+def get_YY_diff_cells(neurons, binned_YY_phase_activity, condition='BB', plot=True):
     '''Find neurons with significantly different responses during Y1 vs Y2'''
     wilcoxon_stat = np.zeros((len(neurons), 1))
     wilcoxon_pval = np.zeros((len(neurons), 1))
-        
+    
+    bins = int(binned_YY_phase_activity['temporal_ABB_firing'][neurons[0]].shape[1] / 2)
+
     for n, cell in enumerate(neurons):
         mean_Y1 = np.mean(binned_YY_phase_activity['temporal_ABB_firing'][cell][:, :bins], axis=1)
         mean_Y2 = np.mean(binned_YY_phase_activity['temporal_ABB_firing'][cell][:, bins:], axis=1)
@@ -916,7 +919,7 @@ def get_Y_psth(neurons, session, dF, events, condition='AB', lm='last_Y', time_a
 
     XY_repeats = np.array([len(patch) / 2 for patch in patches]).astype(int)
 
-    # PSTH for last Y in each patch
+    # PSTH for last/next Y in each patch
     if lm == 'last_Y':
         event_idx = [events[patch[-1]] for patch in patches]
     elif lm == 'next_Y':
@@ -939,11 +942,12 @@ def get_Y_psth(neurons, session, dF, events, condition='AB', lm='last_Y', time_a
             _, ax = plt.subplots(1, 1, figsize=(3,3))
             
             for i, length in enumerate(np.unique(XY_repeats).astype(int)):
-                ax.plot(avg_psth_patch[length][n], color=palette[i], linewidth=2, label=length)
+                patch_mask = XY_repeats == length
+                ax.plot(avg_psth_patch[length][n], color=palette[i], linewidth=2, label=f'{length} ({len(np.where(XY_repeats == length)[0])})')
                 ax.fill_between(np.arange(num_timebins),
-                                avg_psth_patch[length][n] - stats.sem(psth_patch[n, :, :], axis=0),
-                                avg_psth_patch[length][n] + stats.sem(psth_patch[n, :, :], axis=0),
-                                color=palette[i], alpha=0.3)
+                                avg_psth_patch[length][n] - stats.sem(psth_patch[n, patch_mask[:psth_patch.shape[1]], :], axis=0),
+                                avg_psth_patch[length][n] + stats.sem(psth_patch[n, patch_mask[:psth_patch.shape[1]], :], axis=0),
+                                color=palette[i], alpha=0.3) # standard error per patch lengthf
             
             ax.set_ylabel('dF/F')
             ax.set_xlabel('Time (s)')
@@ -953,7 +957,7 @@ def get_Y_psth(neurons, session, dF, events, condition='AB', lm='last_Y', time_a
             ax.axvspan(zero_bin, num_timebins, color='gray', alpha=0.5)
             ax.spines[['right', 'top']].set_visible(False)
 
-            plt.figlegend(loc='upper right', title=f'# {condition}s', bbox_to_anchor=(1.15, 0.8), borderaxespad=0)
+            plt.figlegend(loc='upper right', title=f'# {condition}s', bbox_to_anchor=(1.25, 0.8), borderaxespad=0)
             if lm == 'last_Y':
                 plt.suptitle(f'last {condition[-1]}: neuron {cell}')
             if lm == 'next_Y':
@@ -961,6 +965,81 @@ def get_Y_psth(neurons, session, dF, events, condition='AB', lm='last_Y', time_a
             plt.tight_layout()
     
     return psth_patch, avg_psth_patch
+
+def get_YY_psth(neurons, session, dF, events, condition='AB', time_around=0.5, plot=True):
+    '''
+    Get the PSTH around the two YY events according to patch type. 
+    If last_Y, this is the last Y inside an XY patch. Otherwise, if next_Y, this is the first Y following
+    an alternation violation i.e., the next Y after the end of a patch.
+    '''
+    # Handle time window input
+    if isinstance(time_around, (int, float)):
+        start_time = -time_around
+        end_time = time_around
+    elif isinstance(time_around, (tuple, list)) and len(time_around) == 2:
+        start_time, end_time = time_around
+    else:
+        raise ValueError("time_around must be a single number or a tuple/list of (start, end)")
+
+    # Get PSTHs for each type of landmark
+    psth_patch_last, avg_psth_patch_last = get_Y_psth(neurons, session, dF, events, condition=condition, lm='last_Y', time_around=time_around, plot=False)
+    psth_patch_next, avg_psth_patch_next = get_Y_psth(neurons, session, dF, events, condition=condition, lm='next_Y', time_around=time_around, plot=False)
+
+    # Find patches of alternating AB/BA 
+    _, AB_patches, BA_patches, _, _, _ = get_repeating_XY_patches(session, min_length=0)
+
+    if condition == 'AB':
+        patches = AB_patches
+    elif condition == 'BA':
+        patches = BA_patches
+
+    XY_repeats = np.array([len(patch) / 2 for patch in patches]).astype(int)
+
+    # Plotting
+    if plot:
+        palette = palettes.met_brew('Johnson', n=len(np.unique(XY_repeats)), brew_type="continuous")
+        num_timebins = psth_patch_last.shape[-1]
+
+        for n, cell in enumerate(neurons):
+            _, axs = plt.subplots(1, 2, figsize=(5,3), sharex=True, sharey=True)
+            axs = axs.ravel()
+            
+            for i, length in enumerate(np.unique(XY_repeats).astype(int)):
+                patch_mask = XY_repeats == length
+
+                # Last Y
+                num_patches = psth_patch_last.shape[1]
+                axs[0].plot(avg_psth_patch_last[length][n], color=palette[i], linewidth=2, label=f'{length} ({len(np.where(XY_repeats == length)[0])})')
+                axs[0].fill_between(np.arange(num_timebins),
+                                avg_psth_patch_last[length][n] - stats.sem(psth_patch_last[n, patch_mask[:num_patches], :], axis=0),
+                                avg_psth_patch_last[length][n] + stats.sem(psth_patch_last[n, patch_mask[:num_patches], :], axis=0),
+                                color=palette[i], alpha=0.3) # standard error per patch length
+                axs[0].set_title(f'last {condition[-1]}')
+
+                # Next Y
+                num_patches = psth_patch_next.shape[1]
+                axs[1].plot(avg_psth_patch_next[length][n], color=palette[i], linewidth=2)
+                axs[1].fill_between(np.arange(num_timebins),
+                                avg_psth_patch_next[length][n] - stats.sem(psth_patch_next[n, patch_mask[:num_patches], :], axis=0),
+                                avg_psth_patch_next[length][n] + stats.sem(psth_patch_next[n, patch_mask[:num_patches], :], axis=0),
+                                color=palette[i], alpha=0.3) # standard error per patch length
+                axs[1].set_title(f'next {condition[-1]}')
+
+            axs[0].set_ylabel('dF/F')
+            for ax in axs:
+                ax.set_xlabel('Time (s)')
+                zero_bin = int(round(-start_time / (end_time - start_time) * num_timebins))
+                ax.set_xticks([0, zero_bin, num_timebins - 1])
+                ax.set_xticklabels([round(start_time, 2), 0, round(end_time, 2)])
+                ax.axvspan(zero_bin, num_timebins, color='gray', alpha=0.5)
+                ax.spines[['right', 'top']].set_visible(False)
+
+            plt.figlegend(loc='upper right', title=f'# {condition}s', bbox_to_anchor=(1.15, 0.8), borderaxespad=0)
+            plt.suptitle(f'neuron {cell}')
+            plt.tight_layout()
+    
+    return psth_patch_last, avg_psth_patch_last, psth_patch_next, avg_psth_patch_next
+
 
 # --------- STATISTICS --------- #
 def kendalls_W(chi2, N, k):
@@ -1179,3 +1258,440 @@ def fit_linear_regression_XYlen(neurons, Y_data, session, condition='AB', data_t
             plt.tight_layout()
 
     return slopes, rvalues
+
+
+def fit_linear_regression_XYlen_shuffle(neurons, Y_data, session, condition='AB', data_type='YY_diff', 
+                                        shuffle=True, nreps=1000, plot=True):
+    '''
+    Fit linear regression per time bin to determine if the number of preceding XYs predicts:
+    (a) the difference between two consecutive Ys ['YY_diff'], or 
+    (b) if the activity in the last Y in the patch ['last_Y'] 
+    If shuffle is True, a permutation test is performed nreps times. 
+    '''
+
+    # Define patches
+    _, AB_patches, BA_patches, _, _, _ = get_repeating_XY_patches(session, min_length=0)
+
+    # Find preceding XY length for each patch
+    if condition == 'AB':
+        patches = AB_patches
+    elif condition == 'BA':
+        patches = BA_patches
+
+    XY_repeats = np.array([len(patch) / 2 for patch in patches]).astype(int)
+
+    # Perform linear regression per time bin
+    x = XY_repeats
+
+    linear_regression_result = {}
+    for cell in neurons:
+        x = x[:Y_data[cell].shape[0]]
+        nbins = Y_data[cell].shape[1]
+        linear_regression_result[cell] = {}
+        for t in range(nbins):
+            y = Y_data[cell][:,t]
+            linear_regression_result[cell][t] = stats.linregress(x, y, alternative='two-sided')
+
+    slopes = {cell: np.array([res.slope for t, res in linear_regression_result[cell].items()]) for cell in neurons}
+    rvalues = {cell: np.array([res.rvalue for t, res in linear_regression_result[cell].items()]) for cell in neurons}
+
+    # Permutation test to test against null hypothesis
+    slopes_shuffled = {}
+    rvalues_shuffled = {}
+    if shuffle:
+        for cell in neurons:
+            nbins = Y_data[cell].shape[1]
+            slopes_shuffled[cell] = np.empty((nreps, nbins))
+            rvalues_shuffled[cell] = np.empty((nreps, nbins))
+            for i in range(nreps):
+                np.random.shuffle(x)
+                for t in range(nbins):
+                    y = Y_data[cell][:,t]
+                    result = stats.linregress(x, y, alternative='two-sided')
+                    slopes_shuffled[cell][i,t] = result.slope
+                    rvalues_shuffled[cell][i,t] = result.rvalue
+
+    # Two-sided p-value (for each time bin)
+    pvalue = {}
+    for cell in neurons:
+        null_dist = np.abs(slopes_shuffled[cell])
+        obs = np.abs(slopes[cell])
+        pvalue[cell] = np.mean(null_dist >= obs, axis=0) # pvalues = % null slopes >= observed slope
+
+    # Compute percentiles 
+    low_percentile = {}
+    high_percentile = {}
+    median_percentile = {}
+
+    for cell in neurons:
+        low_percentile[cell] = np.percentile(slopes_shuffled[cell], 2.5, axis=0)
+        high_percentile[cell] = np.percentile(slopes_shuffled[cell], 97.5, axis=0)
+        median_percentile[cell] = np.median(slopes_shuffled[cell], axis=0)
+
+    # Plotting
+    if plot: 
+        max_null = max(max(v) for v in high_percentile.values())
+        min_null = min(min(v) for v in low_percentile.values())
+        max_slope = max(np.max(slopes[cell]) for cell in neurons)
+        min_slope = min(np.min(slopes[cell]) for cell in neurons)
+
+        global_ymax = max(max_null, max_slope) + 0.1
+        global_ymin = min(min_null, min_slope) - 0.1
+
+        for cell in neurons:
+            fig = plt.figure(figsize=(7,4))
+            gs = plt.GridSpec(1, 2, width_ratios=[2, 1])  
+            ax1 = fig.add_subplot(gs[0,0])
+            ax2 = fig.add_subplot(gs[0,1])
+            
+            n_bins = Y_data[cell].shape[1]
+            n_trials = Y_data[cell].shape[0]
+
+            cax1 = ax1.plot(slopes[cell], label='slope')
+            
+            if shuffle:
+                # Plot percentiles of null distribution
+                ax1.plot(median_percentile[cell], color='k', label='shuffle median')
+                ax1.fill_between(np.arange(nbins), low_percentile[cell], high_percentile[cell], color='k', alpha=0.3)
+            
+                # Plot p-values
+                cell_max_slope = max(np.abs(slopes[cell]))
+                sig_bins = np.where(pvalue[cell] < 0.05)[0]
+                ax1.scatter(sig_bins, np.ones(len(sig_bins)) * (-cell_max_slope - 0.05), s=10, color='red', marker='*')
+            
+            ax1.set_title(f'Linear Regression results')
+            ax1.set_xlabel('Time bins')
+            ax1.set_ylim([global_ymin, global_ymax])
+            ax1.hlines(y=0, xmin=0, xmax=n_bins, linestyles='--', colors='grey')
+            # ax1.set_yticks([0, n_trials-1])
+            # ax1.set_yticklabels([0, n_trials])
+            ax1.set_xticks([0, n_bins])
+            ax1.set_ylabel('Beta coefficients (slopes)', labelpad=0)
+
+            axr = ax1.twinx()
+            axr.set_ylim(ax1.get_ylim())
+            axr.plot(rvalues[cell], color='orange', alpha=0.7, label="r-value")
+            axr.set_ylabel("Pearson Correlation (r)", color='orange')
+            axr.tick_params(axis='y', labelcolor='orange')
+            lines_left, labels_left = ax1.get_legend_handles_labels()
+            lines_right, labels_right = axr.get_legend_handles_labels()
+            ax1.legend(lines_left + lines_right, labels_left + labels_right, loc="upper right")
+            
+            if data_type == 'YY_diff':
+                vmax = np.max(np.abs(Y_data[cell]))
+                vmin = -vmax
+                cax2 = ax2.imshow(Y_data[cell], aspect='auto', cmap='bwr', vmin=vmin, vmax=vmax)
+                if condition == 'AB':
+                    ax2.set_title(f'B2-B1')
+                elif condition == 'BA':
+                    ax2.set_title(f'A2-A1')
+                cb2 = fig.colorbar(cax2, ax=ax2, label='YY diff dF/F', ticks=[vmin, vmax])
+            elif data_type == 'last_Y':
+                vmax = np.max(Y_data[cell])
+                vmin = np.min(Y_data[cell])
+                cax2 = ax2.imshow(Y_data[cell], aspect='auto', cmap='viridis')
+                if condition == 'AB':
+                    ax2.set_title(f'last B')
+                elif condition == 'BA':
+                    ax2.set_title(f'last A')
+                cb2 = fig.colorbar(cax2, ax=ax2, label='dF/F', ticks=[vmin, vmax])
+            cb2.ax.set_yticklabels([f"{vmin:.1f}", f"{vmax:.1f}"])
+            cb2.ax.yaxis.labelpad = -10
+            ax2.set_yticks([0, n_trials-1])
+            ax2.set_yticklabels([0, n_trials])
+            ax2.set_xticks([0, n_bins-1])
+            ax2.set_xticklabels([0, n_bins])
+            ax2.set_xlabel('Time bins')
+            
+            plt.suptitle(f'{condition}: neuron {cell}') 
+            plt.tight_layout()
+
+    results = {}
+    results['slopes'] = slopes
+    results['rvalues'] = rvalues
+    if shuffle:
+        results['slopes_shuffled'] = slopes_shuffled
+        results['rvalues_shuffled'] = rvalues_shuffled
+        results['pvalue'] = pvalue
+        
+    return results
+    
+
+def fit_linear_regression_XYlen_cpa(neurons, Y_data, session, condition='AB', data_type='YY_diff', 
+                                    shuffle=True, nreps=1000, cluster_thres=0.05, plot=True, 
+                                    sort_heatmap=False, save_plot=False, save_dir='', plot_dir=''):
+    '''
+    Fit linear regression per time bin to determine if the number of preceding XYs predicts:
+    (a) the difference between two consecutive Ys ['YY_diff'], or 
+    (b) if the activity in the last Y in the patch ['last_Y'] 
+    Cluster permutation analysis is also performed to test for the significance of time clusters. 
+    '''
+    # Define patches
+    _, AB_patches, BA_patches, _, _, _ = get_repeating_XY_patches(session, min_length=0)
+
+    # Find preceding XY length for each patch
+    if condition == 'AB':
+        patches = AB_patches
+    elif condition == 'BA':
+        patches = BA_patches
+
+    XY_repeats = np.array([len(patch) / 2 for patch in patches]).astype(int)
+
+    # Perform linear regression per time bin
+    x = XY_repeats.copy()
+
+    linear_regression_result = {}
+    for cell in neurons:
+        x = x[:Y_data[cell].shape[0]]
+        nbins = Y_data[cell].shape[1]
+        linear_regression_result[cell] = {}
+        for t in range(nbins):
+            y = Y_data[cell][:,t]
+            linear_regression_result[cell][t] = stats.linregress(x, y, alternative='two-sided')
+
+    slopes = {cell: np.array([res.slope for t, res in linear_regression_result[cell].items()]) for cell in neurons}
+    rvalues = {cell: np.array([res.rvalue for t, res in linear_regression_result[cell].items()]) for cell in neurons}
+    pvalues = {cell: np.array([res.pvalue for t, res in linear_regression_result[cell].items()]) for cell in neurons}
+    
+    # Compute clusters and cluster-mass slope (statistic of interest here)
+    clusters = {} # cluster = continuous span of timepoints when pvalue < threshold
+    cluster_mass_stat = {cell: {} for cell in neurons}
+    for cell in neurons:
+        sig_bins = np.where(pvalues[cell] < cluster_thres)[0]
+        
+        if len(sig_bins) == 0:
+            clusters[cell] = []
+            continue
+
+        # Split clusters by whether they have high or low slopes to avoid fluctuations around 0 
+        sig_bins_high = sig_bins[slopes[cell][sig_bins] > 0]
+        cluster_change_idx = np.where(np.diff(sig_bins_high) > 1)[0] + 1
+        split_clusters_high = [c for c in np.split(sig_bins_high, cluster_change_idx) if len(c) > 0]
+
+        sig_bins_low = sig_bins[slopes[cell][sig_bins] < 0]
+        cluster_change_idx = np.where(np.diff(sig_bins_low) > 1)[0] + 1
+        split_clusters_low = [c for c in np.split(sig_bins_low, cluster_change_idx) if len(c) > 0]
+
+        # Combine all clusters
+        split_clusters = split_clusters_high + split_clusters_low
+        clusters[cell] = split_clusters
+
+        for c, cluster in enumerate(split_clusters):
+            cluster_mass_stat[cell][c] = np.sum(np.abs(slopes[cell][cluster]))  
+
+    # Permutation test to test against null hypothesis
+    # The null distribution is a collection of the largest cluster-mass statistic from each simulated data. 
+    # If no clusters are detected in a simulation, it contributes a cluster-mass of zero to the null.
+    if shuffle:
+        slopes_shuffled = {}
+        rvalues_shuffled = {}
+        pvalues_shuffled = {}
+        clusters_shuffled = {cell: {} for cell in neurons}
+        cluster_mass_stat_shuffled = {cell: {} for cell in neurons}
+
+        for cell in neurons:
+            nbins = Y_data[cell].shape[1]
+            slopes_shuffled[cell] = np.empty((nreps, nbins))
+            rvalues_shuffled[cell] = np.empty((nreps, nbins))
+            pvalues_shuffled[cell] = np.empty((nreps, nbins))
+
+            for i in range(nreps):
+                np.random.shuffle(x)
+                for t in range(nbins):
+                    y = Y_data[cell][:,t]
+                    result = stats.linregress(x, y, alternative='two-sided')
+                    slopes_shuffled[cell][i,t] = result.slope
+                    rvalues_shuffled[cell][i,t] = result.rvalue
+                    pvalues_shuffled[cell][i,t] = result.pvalue
+
+                # Compute clusters and cluster stats for each shuffle
+                sig_bins = np.where(pvalues_shuffled[cell][i,:] < cluster_thres)[0]
+                
+                # Split clusters by whether they have high or low slopes to avoid fluctuations around 0 
+                sig_bins_high = sig_bins[slopes[cell][sig_bins] > 0]
+                cluster_change_idx = np.where(np.diff(sig_bins_high) > 1)[0] + 1
+                split_clusters_high = [c for c in np.split(sig_bins_high, cluster_change_idx) if len(c) > 0]
+
+                sig_bins_low = sig_bins[slopes[cell][sig_bins] < 0]
+                cluster_change_idx = np.where(np.diff(sig_bins_low) > 1)[0] + 1
+                split_clusters_low = [c for c in np.split(sig_bins_low, cluster_change_idx) if len(c) > 0]
+
+                # Combine all clusters
+                split_clusters = split_clusters_high + split_clusters_low
+                clusters_shuffled[cell][i] = split_clusters
+
+                # Find the largest cluster-mass statistic for this shuffle
+                all_cluster_masses = []
+                if len(split_clusters) > 0:
+                    for c, cluster in enumerate(split_clusters):
+                        all_cluster_masses.append(np.sum(np.abs(slopes_shuffled[cell][i,cluster]))) 
+                    max_cluster_mass = np.max(all_cluster_masses) # per shuffle
+                    cluster_mass_stat_shuffled[cell][i] = max_cluster_mass
+                else:
+                    cluster_mass_stat_shuffled[cell][i] = 0
+
+        # Two-sided p-value (for each time bin) against null hypothesis
+        pvalue = {}
+        cluster_pvalue = {cell: {} for cell in neurons}
+        for cell in neurons:
+            null_dist = np.abs(slopes_shuffled[cell])
+            obs = np.abs(slopes[cell])
+            pvalue[cell] = np.mean(null_dist >= obs, axis=0) # pvalues = % null slopes >= observed slope
+
+            null_cluster_dist = np.array(list(cluster_mass_stat_shuffled[cell].values()))
+            
+            for c in range(len(clusters[cell])):
+                cluster_obs = np.abs(cluster_mass_stat[cell][c])
+                cluster_pvalue[cell][c] = np.mean(null_cluster_dist >= cluster_obs)
+        
+        # Compute percentiles 
+        low_percentile = {}
+        high_percentile = {}
+        median_percentile = {}
+
+        for cell in neurons:
+            low_percentile[cell] = np.percentile(slopes_shuffled[cell], 2.5, axis=0)
+            high_percentile[cell] = np.percentile(slopes_shuffled[cell], 97.5, axis=0)
+            median_percentile[cell] = np.median(slopes_shuffled[cell], axis=0)
+
+    # Plotting
+    if plot: 
+        max_null = max(max(v) for v in high_percentile.values())
+        min_null = min(min(v) for v in low_percentile.values())
+        max_slope = max(np.max(slopes[cell]) for cell in neurons)
+        min_slope = min(np.min(slopes[cell]) for cell in neurons)
+
+        global_ymax = max(max_null, max_slope) + 0.1
+        global_ymin = min(min_null, min_slope) - 0.1
+
+        for cell in neurons:
+            fig = plt.figure(figsize=(8,4))
+            gs = plt.GridSpec(1, 2, width_ratios=[5, 3])  
+            ax1 = fig.add_subplot(gs[0,0])
+            ax2 = fig.add_subplot(gs[0,1])
+            
+            n_bins = Y_data[cell].shape[1]
+            n_trials = Y_data[cell].shape[0]
+
+            # Regression results
+            cax1 = ax1.plot(slopes[cell], label='slope')
+            
+            if shuffle:
+                # Plot percentiles of null distribution
+                ax1.plot(median_percentile[cell], color='k', label='shuffle median')
+                ax1.fill_between(np.arange(nbins), low_percentile[cell], high_percentile[cell], color='k', alpha=0.3)
+            
+                # Plot p-values
+                cell_max_slope = max(np.abs(slopes[cell]))
+                sig_bins = np.where(pvalue[cell] < 0.05)[0]
+                ax1.scatter(sig_bins, np.ones(len(sig_bins)) * (-cell_max_slope - 0.05), s=10, color='red', marker='*')
+            
+                # Plot significant clusters from CPA and annotate p-value
+                y_pos = -cell_max_slope - 0.3
+                for c, seg in enumerate(clusters[cell]):
+                    if cluster_pvalue[cell][c] < 0.05:
+                        ax1.hlines(y_pos, seg[0], seg[-1], color='green', linewidth=3)
+                        text_y = y_pos - 0.10  
+                        text_x = (seg[0] + seg[-1]) / 2  
+                        label = f"p={cluster_pvalue[cell][c]:.3f}"
+                        ax1.annotate(label, xy=(text_x, text_y), ha='center', va='top', fontsize=8)
+            
+            ax1.set_title(f'Linear Regression results')
+            ax1.set_xlabel('Time bins')
+            ax1.set_ylim([global_ymin - 0.5, global_ymax])
+            ax1.hlines(y=0, xmin=0, xmax=n_bins, linestyles='--', colors='grey')
+            # ax1.set_yticks([0, n_trials-1])
+            # ax1.set_yticklabels([0, n_trials])
+            ax1.set_xticks([0, n_bins])
+            ax1.set_ylabel('Beta coefficients (slopes)', labelpad=0)
+
+            axr = ax1.twinx()
+            axr.set_ylim(ax1.get_ylim())
+            axr.plot(rvalues[cell], color='orange', alpha=0.7, label="r-value")
+            axr.set_ylabel("Pearson Correlation (r)", color='orange')
+            axr.tick_params(axis='y', labelcolor='orange')
+            lines_left, labels_left = ax1.get_legend_handles_labels()
+            lines_right, labels_right = axr.get_legend_handles_labels()
+            ax1.legend(lines_left + lines_right, labels_left + labels_right, loc="upper right")
+            
+            # Heatmaps
+            XY_repeat_sorting_idx = np.argsort(XY_repeats, stable=True)
+            sorted_repeats = XY_repeats[XY_repeat_sorting_idx]
+            if sort_heatmap:
+                heatmap_data = Y_data[cell][XY_repeat_sorting_idx]
+                change_rows = np.where(np.diff(sorted_repeats) != 0)[0] + 1
+
+                block_starts = np.concatenate(([0], change_rows))
+                block_ends   = np.concatenate((change_rows, [len(sorted_repeats)]))
+                block_centers = (block_starts + block_ends) / 2 - 0.5
+                block_values  = [sorted_repeats[start] for start in block_starts]
+
+            else:
+                heatmap_data = Y_data[cell]
+
+            if data_type == 'YY_diff':
+                vmax = np.max(np.abs(heatmap_data))
+                vmin = -vmax
+                cax2 = ax2.imshow(heatmap_data, aspect='auto', cmap='bwr', vmin=vmin, vmax=vmax)
+                if sort_heatmap:
+                    for r in change_rows:
+                        ax2.axhline(r - 0.5, color='black', linewidth=0.8, linestyle='--')
+                    # Indicate number of XY repeats  per block
+                    right_ax = ax2.secondary_yaxis('right')
+                    right_ax.set_yticks(block_centers)
+                    right_ax.set_yticklabels(block_values, fontsize=6)
+                    right_ax.set_ylabel('XY repeats', fontsize=8)
+
+                if condition == 'AB':
+                    ax2.set_title(f'B2-B1')
+                elif condition == 'BA':
+                    ax2.set_title(f'A2-A1')
+                cb2 = fig.colorbar(cax2, ax=ax2, label='YY diff dF/F', ticks=[vmin, vmax], pad=0.3)
+            elif data_type == 'last_Y':
+                vmax = np.max(heatmap_data)
+                vmin = np.min(heatmap_data)
+                cax2 = ax2.imshow(heatmap_data, aspect='auto', cmap='viridis')
+                if condition == 'AB':
+                    ax2.set_title(f'last B')
+                elif condition == 'BA':
+                    ax2.set_title(f'last A')
+                cb2 = fig.colorbar(cax2, ax=ax2, label='dF/F', ticks=[vmin, vmax], pad=0.3)
+            cb2.ax.set_yticklabels([f"{vmin:.1f}", f"{vmax:.1f}"])
+            cb2.ax.yaxis.labelpad = -10
+            ax2.set_yticks([0, n_trials-1])
+            ax2.set_yticklabels([0, n_trials])
+            ax2.set_xticks([0, n_bins-1])
+            ax2.set_xticklabels([0, n_bins])
+            ax2.set_xlabel('Time bins')
+            
+            plt.suptitle(f'{condition}: neuron {cell}') 
+            plt.tight_layout()
+
+            if save_plot:
+                condition_save_path = os.path.join(plot_dir, condition)
+                os.makedirs(condition_save_path, exist_ok=True)
+                plt.savefig(condition_save_path + f'/{data_type}_neuron{cell}.png', dpi=300)
+
+    # Save results
+    results = {}
+    results['slopes'] = slopes
+    results['rvalues'] = rvalues
+    results['pvalues'] = pvalues
+    results['clusters'] = clusters
+    results['cluster_mass_stat'] = cluster_mass_stat
+    if shuffle:
+        results['slopes_shuffled'] = slopes_shuffled
+        results['rvalues_shuffled'] = rvalues_shuffled
+        results['pvalues_shuffled'] = pvalues_shuffled
+        results['clusters_shuffled'] = clusters_shuffled
+        results['cluster_mass_stat_shuffled'] = cluster_mass_stat_shuffled
+        results['pvalue'] = pvalue
+        results['cluster_pvalue'] = cluster_pvalue
+        
+    if save_dir:
+        save_path = os.path.join(save_dir, f"{condition}_{data_type}_linear_regression_results.npz")
+        np_results = {key: np.array(value, dtype=object) for key, value in results.items()}
+        np.savez(save_path, **np_results)
+        print(f"Saved results to: {save_path}")
+
+    return results
