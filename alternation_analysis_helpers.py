@@ -1421,13 +1421,16 @@ def fit_linear_regression_XYlen_shuffle(neurons, Y_data, session, condition='AB'
 
 def fit_linear_regression_XYlen_cpa(neurons, Y_data, session, condition='AB', data_type='YY_diff', 
                                     shuffle=True, nreps=1000, cluster_thres=0.05, plot=True, 
-                                    sort_heatmap=False, save_plot=False, save_dir='', plot_dir=''):
+                                    sort_heatmap=False, save_plot=False, save_dir='', plot_dir='', 
+                                    reload=False):
     '''
     Fit linear regression per time bin to determine if the number of preceding XYs predicts:
     (a) the difference between two consecutive Ys ['YY_diff'], or 
     (b) if the activity in the last Y in the patch ['last_Y'] 
     Cluster permutation analysis is also performed to test for the significance of time clusters. 
     '''
+    results_file = os.path.join(save_dir, f"{condition}_{data_type}_linear_regression_results.npz")
+
     # Define patches
     _, AB_patches, BA_patches, _, _, _ = get_repeating_XY_patches(session, min_length=0)
 
@@ -1441,120 +1444,156 @@ def fit_linear_regression_XYlen_cpa(neurons, Y_data, session, condition='AB', da
     XY_repeats = XY_repeats[:Y_data[neurons[0]].shape[0]] # exclude last repeat if it doesn't end with an XYY patch
 
     # Perform linear regression per time bin
-    x = XY_repeats.copy()
+    if not reload:
+        if os.path.exists(results_file):
+            print('Linear regression with CPA file found. Loading...')
+            results = np.load(results_file, allow_pickle=True)
+            slopes = results['slopes'].item() 
+            rvalues = results['rvalues'].item() 
+            pvalues = results['pvalues'].item() 
+            clusters = results['clusters'].item() 
+            cluster_mass_stat = results['cluster_mass_stat'].item() 
+            if 'slopes_shuffled' in results:
+                slopes_shuffled = results['slopes_shuffled'].item() 
+                rvalues_shuffled = results['rvalues_shuffled'].item() 
+                pvalues_shuffled = results['pvalues_shuffled'].item() 
+                clusters_shuffled = results['clusters_shuffled'].item() 
+                cluster_mass_stat_shuffled = results['cluster_mass_stat_shuffled'].item() 
+                pvalue = results['pvalue'].item() 
+                cluster_pvalue = results['cluster_pvalue'].item() 
+        else:
+            raise ValueError(f'This file does not exist {results_file}')
+    else:
+        x = XY_repeats.copy()
 
-    linear_regression_result = {}
-    for cell in neurons:
-        nbins = Y_data[cell].shape[1]
-        linear_regression_result[cell] = {}
-        for t in range(nbins):
-            y = Y_data[cell][:,t]
-            linear_regression_result[cell][t] = stats.linregress(x, y, alternative='two-sided')
+        nbins = Y_data[neurons[0]].shape[1]
+        linear_regression_result = {}
+        for cell in neurons:
+            linear_regression_result[cell] = {}
+            for t in range(nbins):
+                y = Y_data[cell][:,t]
+                linear_regression_result[cell][t] = stats.linregress(x, y, alternative='two-sided')
 
-    slopes = {cell: np.array([res.slope for t, res in linear_regression_result[cell].items()]) for cell in neurons}
-    rvalues = {cell: np.array([res.rvalue for t, res in linear_regression_result[cell].items()]) for cell in neurons}
-    pvalues = {cell: np.array([res.pvalue for t, res in linear_regression_result[cell].items()]) for cell in neurons}
-    
-    # Compute clusters and cluster-mass slope (statistic of interest here)
-    clusters = {} # cluster = continuous span of timepoints when pvalue < threshold
-    cluster_mass_stat = {cell: {} for cell in neurons}
-    for cell in neurons:
-        sig_bins = np.where(pvalues[cell] < cluster_thres)[0]
+        slopes = {cell: np.array([res.slope for t, res in linear_regression_result[cell].items()]) for cell in neurons}
+        rvalues = {cell: np.array([res.rvalue for t, res in linear_regression_result[cell].items()]) for cell in neurons}
+        pvalues = {cell: np.array([res.pvalue for t, res in linear_regression_result[cell].items()]) for cell in neurons}
         
-        if len(sig_bins) == 0:
-            clusters[cell] = []
-            continue
-
-        # Split clusters by whether they have high or low slopes to avoid fluctuations around 0 
-        sig_bins_high = sig_bins[slopes[cell][sig_bins] > 0]
-        cluster_change_idx = np.where(np.diff(sig_bins_high) > 1)[0] + 1
-        split_clusters_high = [c for c in np.split(sig_bins_high, cluster_change_idx) if len(c) > 0]
-
-        sig_bins_low = sig_bins[slopes[cell][sig_bins] < 0]
-        cluster_change_idx = np.where(np.diff(sig_bins_low) > 1)[0] + 1
-        split_clusters_low = [c for c in np.split(sig_bins_low, cluster_change_idx) if len(c) > 0]
-
-        # Combine all clusters
-        split_clusters = split_clusters_high + split_clusters_low
-        clusters[cell] = split_clusters
-
-        for c, cluster in enumerate(split_clusters):
-            cluster_mass_stat[cell][c] = np.sum(np.abs(slopes[cell][cluster]))  
-
-    # Permutation test to test against null hypothesis
-    # The null distribution is a collection of the largest cluster-mass statistic from each simulated data. 
-    # If no clusters are detected in a simulation, it contributes a cluster-mass of zero to the null.
-    if shuffle:
-        slopes_shuffled = {}
-        rvalues_shuffled = {}
-        pvalues_shuffled = {}
-        clusters_shuffled = {cell: {} for cell in neurons}
-        cluster_mass_stat_shuffled = {cell: {} for cell in neurons}
-
+        # Compute clusters and cluster-mass slope (statistic of interest here)
+        clusters = {} # cluster = continuous span of timepoints when pvalue < threshold
+        cluster_mass_stat = {cell: {} for cell in neurons}
         for cell in neurons:
-            nbins = Y_data[cell].shape[1]
-            slopes_shuffled[cell] = np.empty((nreps, nbins))
-            rvalues_shuffled[cell] = np.empty((nreps, nbins))
-            pvalues_shuffled[cell] = np.empty((nreps, nbins))
-
-            for i in range(nreps):
-                np.random.shuffle(x)
-                for t in range(nbins):
-                    y = Y_data[cell][:,t]
-                    result = stats.linregress(x, y, alternative='two-sided')
-                    slopes_shuffled[cell][i,t] = result.slope
-                    rvalues_shuffled[cell][i,t] = result.rvalue
-                    pvalues_shuffled[cell][i,t] = result.pvalue
-
-                # Compute clusters and cluster stats for each shuffle
-                sig_bins = np.where(pvalues_shuffled[cell][i,:] < cluster_thres)[0]
-                
-                # Split clusters by whether they have high or low slopes to avoid fluctuations around 0 
-                sig_bins_high = sig_bins[slopes[cell][sig_bins] > 0]
-                cluster_change_idx = np.where(np.diff(sig_bins_high) > 1)[0] + 1
-                split_clusters_high = [c for c in np.split(sig_bins_high, cluster_change_idx) if len(c) > 0]
-
-                sig_bins_low = sig_bins[slopes[cell][sig_bins] < 0]
-                cluster_change_idx = np.where(np.diff(sig_bins_low) > 1)[0] + 1
-                split_clusters_low = [c for c in np.split(sig_bins_low, cluster_change_idx) if len(c) > 0]
-
-                # Combine all clusters
-                split_clusters = split_clusters_high + split_clusters_low
-                clusters_shuffled[cell][i] = split_clusters
-
-                # Find the largest cluster-mass statistic for this shuffle
-                all_cluster_masses = []
-                if len(split_clusters) > 0:
-                    for c, cluster in enumerate(split_clusters):
-                        all_cluster_masses.append(np.sum(np.abs(slopes_shuffled[cell][i,cluster]))) 
-                    max_cluster_mass = np.max(all_cluster_masses) # per shuffle
-                    cluster_mass_stat_shuffled[cell][i] = max_cluster_mass
-                else:
-                    cluster_mass_stat_shuffled[cell][i] = 0
-
-        # Two-sided p-value (for each time bin) against null hypothesis
-        pvalue = {}
-        cluster_pvalue = {cell: {} for cell in neurons}
-        for cell in neurons:
-            null_dist = np.abs(slopes_shuffled[cell])
-            obs = np.abs(slopes[cell])
-            pvalue[cell] = np.mean(null_dist >= obs, axis=0) # pvalues = % null slopes >= observed slope
-
-            null_cluster_dist = np.array(list(cluster_mass_stat_shuffled[cell].values()))
+            sig_bins = np.where(pvalues[cell] < cluster_thres)[0]
             
-            for c in range(len(clusters[cell])):
-                cluster_obs = np.abs(cluster_mass_stat[cell][c])
-                cluster_pvalue[cell][c] = np.mean(null_cluster_dist >= cluster_obs)
-        
-        # Compute percentiles 
-        low_percentile = {}
-        high_percentile = {}
-        median_percentile = {}
+            if len(sig_bins) == 0:
+                clusters[cell] = []
+                continue
 
-        for cell in neurons:
-            low_percentile[cell] = np.percentile(slopes_shuffled[cell], 2.5, axis=0)
-            high_percentile[cell] = np.percentile(slopes_shuffled[cell], 97.5, axis=0)
-            median_percentile[cell] = np.median(slopes_shuffled[cell], axis=0)
+            # Split clusters by whether they have high or low slopes to avoid fluctuations around 0 
+            sig_bins_high = sig_bins[slopes[cell][sig_bins] > 0]
+            cluster_change_idx = np.where(np.diff(sig_bins_high) > 1)[0] + 1
+            split_clusters_high = [c for c in np.split(sig_bins_high, cluster_change_idx) if len(c) > 0]
+
+            sig_bins_low = sig_bins[slopes[cell][sig_bins] < 0]
+            cluster_change_idx = np.where(np.diff(sig_bins_low) > 1)[0] + 1
+            split_clusters_low = [c for c in np.split(sig_bins_low, cluster_change_idx) if len(c) > 0]
+
+            # Combine all clusters
+            split_clusters = split_clusters_high + split_clusters_low
+            clusters[cell] = split_clusters
+
+            for c, cluster in enumerate(split_clusters):
+                cluster_mass_stat[cell][c] = np.sum(np.abs(slopes[cell][cluster]))  
+
+        # Permutation test to test against null hypothesis
+        # The null distribution is a collection of the largest cluster-mass statistic from each simulated data. 
+        # If no clusters are detected in a simulation, it contributes a cluster-mass of zero to the null.
+        if shuffle:
+            slopes_shuffled = {}
+            rvalues_shuffled = {}
+            pvalues_shuffled = {}
+            clusters_shuffled = {cell: {} for cell in neurons}
+            cluster_mass_stat_shuffled = {cell: {} for cell in neurons}
+
+            nbins = Y_data[neurons[0]].shape[1]
+            for cell in neurons:
+                slopes_shuffled[cell] = np.empty((nreps, nbins))
+                rvalues_shuffled[cell] = np.empty((nreps, nbins))
+                pvalues_shuffled[cell] = np.empty((nreps, nbins))
+
+                for i in range(nreps):
+                    np.random.shuffle(x)
+                    for t in range(nbins):
+                        y = Y_data[cell][:,t]
+                        result = stats.linregress(x, y, alternative='two-sided')
+                        slopes_shuffled[cell][i,t] = result.slope
+                        rvalues_shuffled[cell][i,t] = result.rvalue
+                        pvalues_shuffled[cell][i,t] = result.pvalue
+
+                    # Compute clusters and cluster stats for each shuffle
+                    sig_bins = np.where(pvalues_shuffled[cell][i,:] < cluster_thres)[0]
+                    
+                    # Split clusters by whether they have high or low slopes to avoid fluctuations around 0 
+                    sig_bins_high = sig_bins[slopes[cell][sig_bins] > 0]
+                    cluster_change_idx = np.where(np.diff(sig_bins_high) > 1)[0] + 1
+                    split_clusters_high = [c for c in np.split(sig_bins_high, cluster_change_idx) if len(c) > 0]
+
+                    sig_bins_low = sig_bins[slopes[cell][sig_bins] < 0]
+                    cluster_change_idx = np.where(np.diff(sig_bins_low) > 1)[0] + 1
+                    split_clusters_low = [c for c in np.split(sig_bins_low, cluster_change_idx) if len(c) > 0]
+
+                    # Combine all clusters
+                    split_clusters = split_clusters_high + split_clusters_low
+                    clusters_shuffled[cell][i] = split_clusters
+
+                    # Find the largest cluster-mass statistic for this shuffle
+                    all_cluster_masses = []
+                    if len(split_clusters) > 0:
+                        for c, cluster in enumerate(split_clusters):
+                            all_cluster_masses.append(np.sum(np.abs(slopes_shuffled[cell][i,cluster]))) 
+                        max_cluster_mass = np.max(all_cluster_masses) # per shuffle
+                        cluster_mass_stat_shuffled[cell][i] = max_cluster_mass
+                    else:
+                        cluster_mass_stat_shuffled[cell][i] = 0
+
+            # Two-sided p-value (for each time bin) against null hypothesis
+            pvalue = {}
+            cluster_pvalue = {cell: {} for cell in neurons}
+            for cell in neurons:
+                null_dist = np.abs(slopes_shuffled[cell])
+                obs = np.abs(slopes[cell])
+                pvalue[cell] = np.mean(null_dist >= obs, axis=0) # pvalues = % null slopes >= observed slope
+
+                null_cluster_dist = np.array(list(cluster_mass_stat_shuffled[cell].values()))
+                
+                for c in range(len(clusters[cell])):
+                    cluster_obs = np.abs(cluster_mass_stat[cell][c])
+                    cluster_pvalue[cell][c] = np.mean(null_cluster_dist >= cluster_obs)
+
+        # Save results
+        results = {}
+        results['slopes'] = slopes
+        results['rvalues'] = rvalues
+        results['pvalues'] = pvalues
+        results['clusters'] = clusters
+        results['cluster_mass_stat'] = cluster_mass_stat
+        if shuffle:
+            results['slopes_shuffled'] = slopes_shuffled
+            results['rvalues_shuffled'] = rvalues_shuffled
+            results['pvalues_shuffled'] = pvalues_shuffled
+            results['clusters_shuffled'] = clusters_shuffled
+            results['cluster_mass_stat_shuffled'] = cluster_mass_stat_shuffled
+            results['pvalue'] = pvalue
+            results['cluster_pvalue'] = cluster_pvalue
+            
+        if save_dir:
+            np_results = {key: np.array(value, dtype=object) for key, value in results.items()}
+            np.savez(results_file, **np_results)
+            print(f"Saved results to: {results_file}")
+            
+    # Compute percentiles 
+    low_percentile = {cell: np.percentile(slopes_shuffled[cell], 2.5, axis=0) for cell in neurons}
+    high_percentile = {cell: np.percentile(slopes_shuffled[cell], 97.5, axis=0) for cell in neurons}
+    median_percentile = {cell: np.median(slopes_shuffled[cell], axis=0) for cell in neurons}
 
     # Plotting
     if plot: 
@@ -1564,7 +1603,7 @@ def fit_linear_regression_XYlen_cpa(neurons, Y_data, session, condition='AB', da
         min_slope = min(np.min(slopes[cell]) for cell in neurons)
 
         global_ymax = max(max_null, max_slope) + 0.1
-        global_ymin = min(min_null, min_slope) - 0.1
+        global_ymin = min(min_null, min_slope) - 0.8
 
         for cell in neurons:
             fig = plt.figure(figsize=(8,4))
@@ -1572,11 +1611,11 @@ def fit_linear_regression_XYlen_cpa(neurons, Y_data, session, condition='AB', da
             ax1 = fig.add_subplot(gs[0,0])
             ax2 = fig.add_subplot(gs[0,1])
             
-            n_bins = Y_data[cell].shape[1]
             n_trials = Y_data[cell].shape[0]
+            nbins = Y_data[cell].shape[1]
 
             # Regression results
-            cax1 = ax1.plot(slopes[cell], label='slope')
+            ax1.plot(slopes[cell], label='slope')
             
             if shuffle:
                 # Plot percentiles of null distribution
@@ -1585,11 +1624,12 @@ def fit_linear_regression_XYlen_cpa(neurons, Y_data, session, condition='AB', da
             
                 # Plot p-values
                 cell_max_slope = max(np.abs(slopes[cell]))
+                cell_min_slope = min(slopes[cell])
                 sig_bins = np.where(pvalue[cell] < 0.05)[0]
-                ax1.scatter(sig_bins, np.ones(len(sig_bins)) * (-cell_max_slope - 0.05), s=10, color='red', marker='*')
+                ax1.scatter(sig_bins, np.ones(len(sig_bins)) * (cell_min_slope - 0.2), s=10, color='red', marker='*')
             
                 # Plot significant clusters from CPA and annotate p-value
-                y_pos = -cell_max_slope - 0.3
+                y_pos = cell_min_slope - 0.4
                 for c, seg in enumerate(clusters[cell]):
                     if cluster_pvalue[cell][c] < 0.05:
                         ax1.hlines(y_pos, seg[0], seg[-1], color='green', linewidth=3)
@@ -1601,10 +1641,10 @@ def fit_linear_regression_XYlen_cpa(neurons, Y_data, session, condition='AB', da
             ax1.set_title(f'Linear Regression results')
             ax1.set_xlabel('Time bins')
             ax1.set_ylim([global_ymin - 0.5, global_ymax])
-            ax1.hlines(y=0, xmin=0, xmax=n_bins, linestyles='--', colors='grey')
+            ax1.hlines(y=0, xmin=0, xmax=nbins-1, linestyles='--', colors='grey')
             # ax1.set_yticks([0, n_trials-1])
             # ax1.set_yticklabels([0, n_trials])
-            ax1.set_xticks([0, n_bins])
+            ax1.set_xticks([0, nbins-1])
             ax1.set_ylabel('Beta coefficients (slopes)', labelpad=0)
 
             axr = ax1.twinx()
@@ -1661,9 +1701,9 @@ def fit_linear_regression_XYlen_cpa(neurons, Y_data, session, condition='AB', da
             cb2.ax.set_yticklabels([f"{vmin:.1f}", f"{vmax:.1f}"])
             cb2.ax.yaxis.labelpad = -10
             ax2.set_yticks([0, n_trials-1])
-            ax2.set_yticklabels([0, n_trials])
-            ax2.set_xticks([0, n_bins-1])
-            ax2.set_xticklabels([0, n_bins])
+            ax2.set_yticklabels([0, n_trials-1])
+            ax2.set_xticks([0, nbins-1])
+            ax2.set_xticklabels([0, nbins])
             ax2.set_xlabel('Time bins')
             
             plt.suptitle(f'{condition}: neuron {cell}') 
@@ -1674,26 +1714,6 @@ def fit_linear_regression_XYlen_cpa(neurons, Y_data, session, condition='AB', da
                 os.makedirs(condition_save_path, exist_ok=True)
                 plt.savefig(condition_save_path + f'/{data_type}_neuron{cell}.png', dpi=300)
 
-    # Save results
-    results = {}
-    results['slopes'] = slopes
-    results['rvalues'] = rvalues
-    results['pvalues'] = pvalues
-    results['clusters'] = clusters
-    results['cluster_mass_stat'] = cluster_mass_stat
-    if shuffle:
-        results['slopes_shuffled'] = slopes_shuffled
-        results['rvalues_shuffled'] = rvalues_shuffled
-        results['pvalues_shuffled'] = pvalues_shuffled
-        results['clusters_shuffled'] = clusters_shuffled
-        results['cluster_mass_stat_shuffled'] = cluster_mass_stat_shuffled
-        results['pvalue'] = pvalue
-        results['cluster_pvalue'] = cluster_pvalue
-        
-    if save_dir:
-        save_path = os.path.join(save_dir, f"{condition}_{data_type}_linear_regression_results.npz")
-        np_results = {key: np.array(value, dtype=object) for key, value in results.items()}
-        np.savez(save_path, **np_results)
-        print(f"Saved results to: {save_path}")
-
+            plt.close(fig)
+            
     return results
