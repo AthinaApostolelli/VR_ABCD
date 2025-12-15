@@ -19,8 +19,8 @@ from cycler import cycler
 import palettes
 import importlib
 
-import neural_analysis_helpers
-import cellTV_functions as cellTV
+from analysis import neural_analysis_helpers
+from cellTV import cellTV_functions as cellTV
 importlib.reload(neural_analysis_helpers)
 importlib.reload(cellTV)
 
